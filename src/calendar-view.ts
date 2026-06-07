@@ -23,7 +23,11 @@ interface BandPlacement extends Occurrence {
 	startCol: number; // 0-6, column within its week
 	endCol: number; // 0-6 inclusive
 	lane: number;
+	isStart: boolean; // true if this segment contains the occurrence's actual first day
+	isEnd: boolean; // true if this segment contains the occurrence's actual last day
 }
+
+const MAX_DOTS_PER_DAY = 4;
 
 type ChipEntry =
 	| { kind: "schedule"; item: ScheduleItem; category: Category | null }
@@ -145,10 +149,16 @@ export class LilacCalendarView extends ItemView {
 			if (week === REFERENCE_ROW) weekEl.addClass("lilac-reference-week");
 			// CSS custom properties can't drive repeat()'s count, so build the track list directly:
 			// one fixed-height row per band lane, then a flexible row for the day cells.
-			weekEl.style.gridTemplateRows = `${"1.4em ".repeat(laneCount)}minmax(5em, 1fr)`;
+			// Row height is set generously relative to the band's own height (see .lilac-band —
+			// both scale off the same inherited font-size, so the ratio holds at any zoom/theme)
+			// so a band can never be taller than its lane and get clipped by the row's
+			// overflow:hidden — that clipping was itself reading as "깨져" (a chopped-off bar).
+			weekEl.style.gridTemplateRows = `${"1.9em ".repeat(laneCount)}minmax(5em, 1fr)`;
 
 			for (const band of bands) {
 				const el = weekEl.createDiv({ cls: "lilac-band" });
+				if (!band.isStart) el.addClass("lilac-band-continues-left");
+				if (!band.isEnd) el.addClass("lilac-band-continues-right");
 				el.style.gridColumn = `${band.startCol + 1} / ${band.endCol + 2}`;
 				el.style.gridRow = `${band.lane + 1}`;
 				if (band.category) el.style.setProperty("--lilac-chip-color", band.category.color);
@@ -181,9 +191,19 @@ export class LilacCalendarView extends ItemView {
 					void openDailyNote(this.app, date);
 				};
 
-				const entryList = cell.createDiv({ cls: "lilac-cell-entries" });
-				for (const entry of chipsByCol.get(day) ?? []) {
-					this.renderChip(entryList, entry);
+				const entries = chipsByCol.get(day) ?? [];
+				if (entries.length > 0) {
+					// Google/Samsung Calendar don't try to fit event titles into a day cell —
+					// they show small colored dots and put full text in the agenda below.
+					// Cramming truncated text in here is what looked broken on narrow screens
+					// ("아이콘만 보이고 내용이 안 보여" / "글자가 잘려서"); dots sidestep that
+					// entirely while still showing at a glance how busy a day is.
+					const dots = cell.createDiv({ cls: "lilac-cell-dots" });
+					const visible = entries.slice(0, MAX_DOTS_PER_DAY);
+					for (const entry of visible) this.renderDot(dots, entry);
+					if (entries.length > visible.length) {
+						dots.createSpan({ cls: "lilac-cell-dot-more", text: `+${entries.length - visible.length}` });
+					}
 				}
 			}
 		}
@@ -308,9 +328,21 @@ export class LilacCalendarView extends ItemView {
 		const spanning = occurrences
 			.filter((o) => o.startISO !== o.endISO && o.endISO >= weekStartISO && o.startISO <= weekEndISO)
 			.map((o) => {
-				const startCol = Math.max(0, this.dayOffset(weekStart, o.startISO));
-				const endCol = Math.min(6, this.dayOffset(weekStart, o.endISO));
-				return { ...o, startCol, endCol, lane: 0 };
+				const rawStart = this.dayOffset(weekStart, o.startISO);
+				const rawEnd = this.dayOffset(weekStart, o.endISO);
+				// A multi-week occurrence is necessarily split into one segment per row —
+				// that's unavoidable in any grid layout (Google/Samsung Calendar do the same).
+				// What reads as "broken" is when every segment looks like its own pill with
+				// rounded ends; isStart/isEnd let the renderer square off the edges that are
+				// mid-occurrence cuts, so consecutive rows visually read as one continuing bar.
+				return {
+					...o,
+					startCol: Math.max(0, rawStart),
+					endCol: Math.min(6, rawEnd),
+					isStart: rawStart >= 0,
+					isEnd: rawEnd <= 6,
+					lane: 0,
+				};
 			})
 			.sort((a, b) => a.startCol - b.startCol || b.endCol - a.endCol);
 
@@ -376,26 +408,16 @@ export class LilacCalendarView extends ItemView {
 		return category ? category.calendar_visible : true;
 	}
 
-	private renderChip(container: HTMLElement, entry: ChipEntry): void {
-		if (entry.kind === "schedule") {
-			const { item, category } = entry;
-			const chip = container.createDiv({ cls: "lilac-chip lilac-chip-event" });
-			if (category) chip.style.setProperty("--lilac-chip-color", category.color);
-			const text = item.schedule_kind === "time" && item.time_start ? `${item.time_start} ${item.title}` : item.title;
-			chip.createSpan({ cls: "lilac-chip-label", text });
-			chip.onclick = (e) => {
-				e.stopPropagation();
-				void this.openItemTarget(item);
-			};
-			return;
+	/** A small tappable dot — schedule items get a filled dot in their category color, todos a hollow ring. */
+	private renderDot(container: HTMLElement, entry: ChipEntry): void {
+		const item = entry.item;
+		const dot = container.createDiv({ cls: "lilac-cell-dot" });
+		dot.addClass(entry.kind === "schedule" ? "lilac-cell-dot-event" : "lilac-cell-dot-todo");
+		if (entry.kind === "schedule" && entry.category) {
+			dot.style.setProperty("--lilac-chip-color", entry.category.color);
 		}
-
-		const { item } = entry;
-		const chip = container.createDiv({ cls: "lilac-chip lilac-chip-todo" });
-		const marker = item.do_date ? "▸" : "⏰"; // do_date = 실행 예정일, due-only = 마감 임박 표시
-		chip.createSpan({ cls: "lilac-chip-marker", text: marker });
-		chip.createSpan({ cls: "lilac-chip-label", text: item.title });
-		chip.onclick = (e) => {
+		dot.setAttr("aria-label", item.title);
+		dot.onclick = (e) => {
 			e.stopPropagation();
 			void this.openItemTarget(item);
 		};
