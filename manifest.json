@@ -1,0 +1,9 @@
+{
+  "id": "lilac",
+  "name": "Lilac",
+  "version": "0.0.1",
+  "minAppVersion": "1.4.0",
+  "description": "Personal schedule + todo manager (calendar view + daily note integration). Markdown-native, mobile-compatible.",
+  "author": "odroid",
+  "isDesktopOnly": false
+}
