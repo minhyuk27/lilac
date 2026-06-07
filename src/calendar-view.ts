@@ -137,23 +137,32 @@ export class LilacCalendarView extends ItemView {
 
 		const today = new Date();
 
-		for (let week = 0; week < GRID_WEEKS; week++) {
+		// First pass: place bands for every week, and find the largest lane count across
+		// ALL of them — see lilac DECISIONS 2026-06-07 ("일정있는 열이 달력칸을 나누는
+		// 표를 벌려서 한 줄이 더 생기는 식"): computing the row template per-week meant
+		// weeks with period events reserved extra lane rows while weeks without them
+		// didn't, so week rows ended up different heights and the grid's horizontal
+		// dividing lines looked uneven/pushed apart. Reserving the same fixed band-lane
+		// space in every row — even when a given week has nothing to show there — keeps
+		// every week row the same height, exactly like Google/Samsung Calendar.
+		const weeks = Array.from({ length: GRID_WEEKS }, (_, week) => {
 			const weekStart = addDays(gridStart, week * 7);
 			const weekStartISO = toISO(weekStart);
 			const weekEndISO = toISO(addDays(weekStart, 6));
+			return { weekStart, bands: this.placeBands(occurrences, weekStart, weekStartISO, weekEndISO) };
+		});
+		const laneCount = Math.max(0, ...weeks.map((w) => Math.max(0, ...w.bands.map((b) => b.lane + 1))));
+		// CSS custom properties can't drive repeat()'s count, so build the track list directly:
+		// one fixed-height row per band lane, then a flexible row for the day cells. The band's
+		// own height (.lilac-band) and this track height both scale off the same inherited
+		// font-size at a fixed ratio, so a band can never be taller than its lane and get
+		// clipped by the row's overflow:hidden.
+		const rowTemplate = `${"1.9em ".repeat(laneCount)}minmax(5em, 1fr)`;
 
-			const bands = this.placeBands(occurrences, weekStart, weekStartISO, weekEndISO);
-			const laneCount = Math.max(0, ...bands.map((b) => b.lane + 1));
-
+		weeks.forEach(({ weekStart, bands }, week) => {
 			const weekEl = grid.createDiv({ cls: "lilac-calendar-week" });
 			if (week === REFERENCE_ROW) weekEl.addClass("lilac-reference-week");
-			// CSS custom properties can't drive repeat()'s count, so build the track list directly:
-			// one fixed-height row per band lane, then a flexible row for the day cells.
-			// Row height is set generously relative to the band's own height (see .lilac-band —
-			// both scale off the same inherited font-size, so the ratio holds at any zoom/theme)
-			// so a band can never be taller than its lane and get clipped by the row's
-			// overflow:hidden — that clipping was itself reading as "깨져" (a chopped-off bar).
-			weekEl.style.gridTemplateRows = `${"1.9em ".repeat(laneCount)}minmax(5em, 1fr)`;
+			weekEl.style.gridTemplateRows = rowTemplate;
 
 			for (const band of bands) {
 				const el = weekEl.createDiv({ cls: "lilac-band" });
@@ -206,7 +215,7 @@ export class LilacCalendarView extends ItemView {
 					}
 				}
 			}
-		}
+		});
 	}
 
 	private selectDate(dateISO: string): void {
