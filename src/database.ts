@@ -1,5 +1,29 @@
-import initSqlJs, { Database } from "sql.js";
-import { LilacItem, Category } from "./types";
+import initSqlJs, { Database, SqlValue } from "sql.js";
+import { LilacItem, ScheduleItem, Category, Recurrence, ScheduleKind } from "./types";
+
+function str(v: SqlValue): string | null {
+	return typeof v === "string" ? v : null;
+}
+
+function rowToScheduleItem(row: SqlValue[]): ScheduleItem {
+	// column order matches SCHEMA: path,type,title,category,schedule_kind,start,end,
+	// time_start,time_end,due,do_date,done,done_date,calendar_visible,link,recurrence
+	const recurrenceRaw = str(row[15]);
+	return {
+		path: row[0] as string,
+		type: "schedule",
+		title: row[2] as string,
+		category: str(row[3]),
+		schedule_kind: (str(row[4]) as ScheduleKind) ?? "day",
+		start: str(row[5]),
+		end: str(row[6]),
+		time_start: str(row[7]),
+		time_end: str(row[8]),
+		calendar_visible: row[13] === null ? null : row[13] === 1,
+		link: str(row[14]),
+		recurrence: recurrenceRaw ? (JSON.parse(recurrenceRaw) as Recurrence) : null,
+	};
+}
 
 const SCHEMA = `
 CREATE TABLE items (
@@ -107,6 +131,40 @@ export class LilacDatabase {
 
 	countCategories(): number {
 		return this.countRows("categories");
+	}
+
+	getCategories(): Category[] {
+		const result = this.db.exec("SELECT id, name, color, calendar_visible FROM categories");
+		const rows = result[0]?.values ?? [];
+		return rows.map((row) => ({
+			id: row[0] as string,
+			name: row[1] as string,
+			color: row[2] as string,
+			calendar_visible: row[3] === 1,
+		}));
+	}
+
+	/**
+	 * Schedule items whose date range overlaps [startISO, endISO] (inclusive,
+	 * "YYYY-MM-DD" strings — lexical comparison is correct for ISO dates).
+	 * Recurrence is NOT expanded here (see lilac SPEC §2.3 — expansion happens
+	 * at query time in the view layer, only for the visible window).
+	 */
+	getScheduleItemsOverlapping(startISO: string, endISO: string): ScheduleItem[] {
+		const result = this.db.exec(
+			`SELECT path, type, title, category, schedule_kind, start, "end", time_start,
+			        time_end, due, do_date, done, done_date, calendar_visible, link, recurrence
+			 FROM items
+			 WHERE type = 'schedule'
+			   AND (
+			        (schedule_kind = 'period' AND start <= ? AND COALESCE("end", start) >= ?)
+			     OR (schedule_kind != 'period' AND start BETWEEN ? AND ?)
+			     OR (recurrence IS NOT NULL AND start <= ?)
+			   )`,
+			[endISO, startISO, startISO, endISO, endISO]
+		);
+		const rows = result[0]?.values ?? [];
+		return rows.map(rowToScheduleItem);
 	}
 
 	close(): void {

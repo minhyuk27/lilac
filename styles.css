@@ -1,1 +1,135 @@
-/* lilac plugin styles — populated as views are built (Phase 2+) */
+.lilac-calendar {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5em;
+	height: 100%;
+}
+
+.lilac-calendar-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75em;
+}
+
+.lilac-calendar-nav {
+	display: flex;
+	gap: 0.25em;
+}
+
+.lilac-nav-btn {
+	cursor: pointer;
+}
+
+.lilac-calendar-label {
+	font-weight: 600;
+	font-size: 1.05em;
+}
+
+.lilac-calendar-grid {
+	display: flex;
+	flex-direction: column;
+	border-top: 1px solid var(--background-modifier-border);
+	border-left: 1px solid var(--background-modifier-border);
+}
+
+.lilac-calendar-row {
+	display: grid;
+	grid-template-columns: repeat(7, 1fr);
+}
+
+.lilac-calendar-weekdays {
+	font-size: 0.8em;
+	font-weight: 600;
+	color: var(--text-muted);
+}
+
+.lilac-calendar-weekday {
+	padding: 0.25em 0.4em;
+	border-right: 1px solid var(--background-modifier-border);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.lilac-calendar-cell {
+	min-height: 5.5em;
+	padding: 0.25em 0.35em;
+	border-right: 1px solid var(--background-modifier-border);
+	border-bottom: 1px solid var(--background-modifier-border);
+	display: flex;
+	flex-direction: column;
+	gap: 0.15em;
+}
+
+.lilac-reference-week {
+	background-color: var(--background-secondary);
+}
+
+.lilac-cell-date {
+	font-size: 0.85em;
+	cursor: pointer;
+	width: fit-content;
+	border-radius: 50%;
+	padding: 0.05em 0.4em;
+}
+
+.lilac-cell-date:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.lilac-today .lilac-cell-date {
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+	font-weight: 700;
+}
+
+.lilac-sunday .lilac-cell-date,
+.lilac-calendar-weekday.lilac-sunday {
+	color: var(--text-error);
+}
+
+.lilac-saturday .lilac-cell-date,
+.lilac-calendar-weekday.lilac-saturday {
+	color: var(--text-accent);
+}
+
+.lilac-cell-entries {
+	display: flex;
+	flex-direction: column;
+	gap: 0.1em;
+	overflow: hidden;
+}
+
+.lilac-chip {
+	font-size: 0.72em;
+	line-height: 1.5;
+	padding: 0 0.4em;
+	color: var(--text-on-accent);
+	background-color: var(--lilac-chip-color, var(--interactive-accent));
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	cursor: pointer;
+	border-radius: 0.6em;
+}
+
+/* Period bands: square off the connecting edges so consecutive days read as one bar */
+.lilac-chip-start {
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+	margin-right: -0.35em;
+	padding-right: 0.6em;
+}
+
+.lilac-chip-middle {
+	border-radius: 0;
+	margin-left: -0.35em;
+	margin-right: -0.35em;
+	text-align: center;
+	text-indent: -9999px; /* keep the bar continuous; title only shown at the start cell */
+}
+
+.lilac-chip-end {
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+	margin-left: -0.35em;
+}

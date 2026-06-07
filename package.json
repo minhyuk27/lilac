@@ -21,6 +21,7 @@
     "typescript": "^5.4.0"
   },
   "dependencies": {
+    "obsidian-daily-notes-interface": "^0.9.5",
     "sql.js": "^1.10.2"
   }
 }
