@@ -157,6 +157,13 @@
 /* Bands: placed via explicit grid-column/-row spans (see calendar-view.ts) so they
    read as one continuous bar across the days they cover — no seams between cells. */
 .lilac-band {
+	/* Grid items default to min-width:auto, which refuses to shrink below the text's
+	   natural width — a long title then forces its column track wider than 1fr,
+	   breaking the 7-column alignment for the whole grid ("캘린더 전체가 깨지는데").
+	   min-width:0 + max-width:100% lets it truncate inside its assigned span instead. */
+	min-width: 0;
+	max-width: 100%;
+	box-sizing: border-box;
 	margin: 0.05em 0.15em;
 	padding: 0 0.5em;
 	font-size: 0.68em;
