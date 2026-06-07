@@ -27,11 +27,13 @@ interface BandPlacement extends Occurrence {
 	isEnd: boolean; // true if this segment contains the occurrence's actual last day
 }
 
-const MAX_DOTS_PER_DAY = 4;
+const MAX_CHIPS_PER_DAY = 3;
 
-type ChipEntry =
-	| { kind: "schedule"; item: ScheduleItem; category: Category | null }
-	| { kind: "todo"; item: TodoItem; category: Category | null };
+/** How many of a day's todos are still pending vs. already finished — drives the day badge. */
+interface TodoDaySummary {
+	pending: number;
+	done: number;
+}
 
 export class LilacCalendarView extends ItemView {
 	private referenceWeekStart: Date;
@@ -99,9 +101,10 @@ export class LilacCalendarView extends ItemView {
 		const todos = (db?.getTodoItemsInRange(gridStartISO, gridEndISO) ?? []).filter((t) =>
 			this.isCategoryVisible(t.category ? categoryById.get(t.category) ?? null : null)
 		);
+		const todoSummaryByDate = this.summarizeTodosByDate(todos);
 
 		this.renderHeader(container, gridStart, gridEnd);
-		this.renderGrid(container, gridStart, occurrences, todos);
+		this.renderGrid(container, gridStart, occurrences, todoSummaryByDate);
 		this.renderDayDetail(container, occurrences, todos);
 	}
 
@@ -125,7 +128,12 @@ export class LilacCalendarView extends ItemView {
 		return `${start.getFullYear()}.${start.getMonth() + 1} – ${end.getFullYear()}.${end.getMonth() + 1}`;
 	}
 
-	private renderGrid(container: HTMLElement, gridStart: Date, occurrences: Occurrence[], todos: TodoItem[]): void {
+	private renderGrid(
+		container: HTMLElement,
+		gridStart: Date,
+		occurrences: Occurrence[],
+		todoSummaryByDate: Map<string, TodoDaySummary>
+	): void {
 		const grid = container.createDiv({ cls: "lilac-calendar-grid" });
 
 		const weekdayRow = grid.createDiv({ cls: "lilac-calendar-weekdays" });
@@ -178,7 +186,7 @@ export class LilacCalendarView extends ItemView {
 				};
 			}
 
-			const chipsByCol = this.collectDayChips(occurrences, todos, weekStart);
+			const chipsByCol = this.collectDayChips(occurrences, weekStart);
 
 			for (let day = 0; day < 7; day++) {
 				const date = addDays(weekStart, day);
@@ -200,19 +208,28 @@ export class LilacCalendarView extends ItemView {
 					void openDailyNote(this.app, date);
 				};
 
-				const entries = chipsByCol.get(day) ?? [];
-				if (entries.length > 0) {
-					// Google/Samsung Calendar don't try to fit event titles into a day cell —
-					// they show small colored dots and put full text in the agenda below.
-					// Cramming truncated text in here is what looked broken on narrow screens
-					// ("아이콘만 보이고 내용이 안 보여" / "글자가 잘려서"); dots sidestep that
-					// entirely while still showing at a glance how busy a day is.
-					const dots = cell.createDiv({ cls: "lilac-cell-dots" });
-					const visible = entries.slice(0, MAX_DOTS_PER_DAY);
-					for (const entry of visible) this.renderDot(dots, entry);
-					if (entries.length > visible.length) {
-						dots.createSpan({ cls: "lilac-cell-dot-more", text: `+${entries.length - visible.length}` });
+				// Todomate-style day badge (사용자가 직접 캡처해 보여준 참고 화면): one summary
+				// indicator per day rather than per-item — ✓ once everything due that day is
+				// done, otherwise the remaining count. This is what actually solved "아이콘만
+				// 보이고 내용이 안 보여" for todos: there's no title text to truncate anymore.
+				const summary = todoSummaryByDate.get(dateISO);
+				if (summary && (summary.pending > 0 || summary.done > 0)) {
+					const badge = dateLabel.createSpan({ cls: "lilac-todo-badge" });
+					if (summary.pending > 0) {
+						badge.setText(String(summary.pending));
+					} else {
+						badge.addClass("lilac-todo-badge-done");
+						badge.setText("✓");
 					}
+				}
+
+				// 일정(이벤트)은 이름이 있는 항목이라 — 사용자 요청대로 — 점이 아니라
+				// 카테고리 색이 입혀진 텍스트 칩으로 표시 (Google Calendar 월간뷰와 동일한 언어).
+				const entries = chipsByCol.get(day) ?? [];
+				const visible = entries.slice(0, MAX_CHIPS_PER_DAY);
+				for (const entry of visible) this.renderEventChip(cell, entry);
+				if (entries.length > visible.length) {
+					cell.createDiv({ cls: "lilac-cell-more", text: `+${entries.length - visible.length}개` });
 				}
 			}
 		});
@@ -272,14 +289,20 @@ export class LilacCalendarView extends ItemView {
 			});
 		}
 
+		// Done todos are now included (see getTodoItemsInRange — needed so the badge's "✓ 다 끝냄"
+		// state has something to show when tapped). Sort them to the bottom with a muted/struck
+		// style so the agenda still reads "what's left" first, "what's done" second.
 		for (const todo of dayTodos) {
 			rows.push({
-				sortKey: `1_${todo.title}`,
+				sortKey: `${todo.done ? 2 : 1}_${todo.title}`,
 				render: (parent) => {
 					const row = parent.createDiv({ cls: "lilac-detail-row lilac-detail-row-todo" });
-					row.createDiv({ cls: "lilac-detail-marker", text: todo.do_date === dateISO ? "▸" : "⏰" });
+					if (todo.done) row.addClass("lilac-detail-row-done");
+					const marker = todo.done ? "✓" : todo.do_date === dateISO ? "▸" : "⏰";
+					row.createDiv({ cls: "lilac-detail-marker", text: marker });
 					const text = row.createDiv({ cls: "lilac-detail-text" });
-					text.createSpan({ cls: "lilac-detail-time", text: todo.do_date === dateISO ? "실행 예정" : "마감" });
+					const timeLabel = todo.done ? "완료" : todo.do_date === dateISO ? "실행 예정" : "마감";
+					text.createSpan({ cls: "lilac-detail-time", text: timeLabel });
 					text.createSpan({ cls: "lilac-detail-title", text: todo.title });
 					row.onclick = () => void this.openItemTarget(todo);
 				},
@@ -365,37 +388,25 @@ export class LilacCalendarView extends ItemView {
 		return spanning;
 	}
 
-	/** Single-day schedule occurrences + todos for this week, grouped by weekday column (0=Sun..6=Sat). */
-	private collectDayChips(occurrences: Occurrence[], todos: TodoItem[], weekStart: Date): Map<number, ChipEntry[]> {
-		const map = new Map<number, ChipEntry[]>();
-		const push = (col: number, entry: ChipEntry) => {
-			const list = map.get(col);
-			if (list) list.push(entry);
-			else map.set(col, [entry]);
-		};
-
+	/**
+	 * Single-day schedule occurrences for this week, grouped by weekday column (0=Sun..6=Sat).
+	 * Todos are intentionally absent here — they're summarized into the day badge instead
+	 * (see lilac DECISIONS 2026-06-07, Todomate 참고: "todo와 일정을 확실히 구분해").
+	 */
+	private collectDayChips(occurrences: Occurrence[], weekStart: Date): Map<number, Occurrence[]> {
+		const map = new Map<number, Occurrence[]>();
 		for (const occ of occurrences) {
 			if (occ.startISO !== occ.endISO) continue; // bands handled separately
 			const col = this.dayOffset(weekStart, occ.startISO);
-			if (col >= 0 && col <= 6) push(col, { kind: "schedule", item: occ.item, category: occ.category });
+			if (col < 0 || col > 6) continue;
+			const list = map.get(col);
+			if (list) list.push(occ);
+			else map.set(col, [occ]);
 		}
-
-		for (const todo of todos) {
-			const dateISO = todo.do_date ?? todo.due;
-			if (!dateISO) continue;
-			const col = this.dayOffset(weekStart, dateISO);
-			if (col >= 0 && col <= 6) push(col, { kind: "todo", item: todo, category: null });
-		}
-
 		for (const list of map.values()) {
-			list.sort((a, b) => this.chipSortKey(a).localeCompare(this.chipSortKey(b)));
+			list.sort((a, b) => (a.item.time_start ?? "").localeCompare(b.item.time_start ?? "") || a.item.title.localeCompare(b.item.title));
 		}
 		return map;
-	}
-
-	private chipSortKey(entry: ChipEntry): string {
-		const time = entry.kind === "schedule" ? entry.item.time_start ?? "" : "";
-		return `${time}_${entry.item.title}`;
 	}
 
 	private dayOffset(weekStart: Date, iso: string): number {
@@ -417,19 +428,30 @@ export class LilacCalendarView extends ItemView {
 		return category ? category.calendar_visible : true;
 	}
 
-	/** A small tappable dot — schedule items get a filled dot in their category color, todos a hollow ring. */
-	private renderDot(container: HTMLElement, entry: ChipEntry): void {
-		const item = entry.item;
-		const dot = container.createDiv({ cls: "lilac-cell-dot" });
-		dot.addClass(entry.kind === "schedule" ? "lilac-cell-dot-event" : "lilac-cell-dot-todo");
-		if (entry.kind === "schedule" && entry.category) {
-			dot.style.setProperty("--lilac-chip-color", entry.category.color);
-		}
-		dot.setAttr("aria-label", item.title);
-		dot.onclick = (e) => {
+	/** A single-day event shown by name — same visual language as a band, just not grid-spanned. */
+	private renderEventChip(container: HTMLElement, occ: Occurrence): void {
+		const chip = container.createDiv({ cls: "lilac-event-chip" });
+		if (occ.category) chip.style.setProperty("--lilac-chip-color", occ.category.color);
+		const text = occ.item.schedule_kind === "time" && occ.item.time_start ? `${occ.item.time_start} ${occ.item.title}` : occ.item.title;
+		chip.setText(text);
+		chip.onclick = (e) => {
 			e.stopPropagation();
-			void this.openItemTarget(item);
+			void this.openItemTarget(occ.item);
 		};
+	}
+
+	/** Buckets each todo's date (do_date if set, else due) into pending/done counts for the day badge. */
+	private summarizeTodosByDate(todos: TodoItem[]): Map<string, TodoDaySummary> {
+		const map = new Map<string, TodoDaySummary>();
+		for (const todo of todos) {
+			const dateISO = todo.do_date ?? todo.due;
+			if (!dateISO) continue;
+			const summary = map.get(dateISO) ?? { pending: 0, done: 0 };
+			if (todo.done) summary.done++;
+			else summary.pending++;
+			map.set(dateISO, summary);
+		}
+		return map;
 	}
 
 	private async openItemTarget(item: ScheduleItem | TodoItem): Promise<void> {

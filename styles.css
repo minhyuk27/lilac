@@ -110,6 +110,7 @@
 }
 
 .lilac-cell-date {
+	position: relative; /* anchors .lilac-todo-badge to this circle's corner */
 	font-size: 0.78em;
 	cursor: pointer;
 	width: 1.6em;
@@ -194,41 +195,61 @@
 	margin-right: 0;
 }
 
-/* Day-cell indicators: Google/Samsung Calendar don't try to fit event titles into a
-   month-grid cell — they show small dots and leave full text to the agenda below.
-   Cramming truncated titles in here is what looked broken on narrow phone screens
-   ("아이콘만 보이고 내용이 안 보여" / "글자가 잘려서 볼 수가 없어"); dots sidestep
-   the truncation problem entirely while still showing how busy a day is at a glance. */
-.lilac-cell-dots {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 0.3em;
-	margin-top: 0.05em;
-}
-
-.lilac-cell-dot {
-	width: 0.5em;
-	height: 0.5em;
-	border-radius: 50%;
-	flex-shrink: 0;
+/* Single-day events are named things — users need to recognize *which* meeting/trip
+   it is at a glance, so (per user request: "일정은 지금처럼 글로 보이게") they keep
+   their title as a small colored chip, the same visual language as a multi-day band. */
+.lilac-event-chip {
+	box-sizing: border-box;
+	min-width: 0;
+	max-width: 100%;
+	margin: 0.05em 0;
+	padding: 0.05em 0.4em;
+	font-size: 0.64em;
+	font-weight: 600;
+	line-height: 1.4;
+	color: var(--text-on-accent);
+	background-color: var(--lilac-chip-color, var(--interactive-accent));
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	border-radius: 0.35em;
 	cursor: pointer;
 }
 
-.lilac-cell-dot-event {
-	background-color: var(--lilac-chip-color, var(--interactive-accent));
-}
-
-.lilac-cell-dot-todo {
-	box-sizing: border-box;
-	background-color: transparent;
-	border: 1.5px solid var(--text-faint);
-}
-
-.lilac-cell-dot-more {
+.lilac-cell-more {
 	font-size: 0.6em;
-	line-height: 1;
+	line-height: 1.4;
 	color: var(--text-faint);
+	padding: 0 0.2em;
+}
+
+/* Todomate-style day badge (사용자가 캡처해 보여준 참고 화면 — 날짜마다 그날 할일의
+   완료 상태를 배지 하나로 요약: 다 끝내면 ✓, 남았으면 남은 개수). Anchored to the
+   corner of the date circle so it doesn't compete with event chips for cell width —
+   and because todos have no distinct identity worth showing individually here
+   (per user request: "todo는 숫자 배지로"), one summary number replaces N truncated titles. */
+.lilac-todo-badge {
+	position: absolute;
+	top: -0.2em;
+	right: -0.35em;
+	min-width: 1.15em;
+	height: 1.15em;
+	box-sizing: border-box;
+	padding: 0 0.2em;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 0.65em;
+	font-size: 0.62em;
+	font-weight: 700;
+	line-height: 1;
+	color: var(--text-on-accent);
+	background-color: var(--interactive-accent);
+	border: 1.5px solid var(--background-primary);
+}
+
+.lilac-todo-badge.lilac-todo-badge-done {
+	background-color: var(--text-success, #4caf50);
 }
 
 /* Day-detail panel: full-text agenda for the selected date, shown below the grid.
@@ -325,4 +346,15 @@
 
 .lilac-detail-row-todo .lilac-detail-title {
 	color: var(--text-muted);
+}
+
+/* Finished todos sink visually — the badge already told the user "이 날은 다 끝냄";
+   here they're just a faded record of what was done, not something to act on. */
+.lilac-detail-row-done .lilac-detail-title {
+	color: var(--text-faint);
+	text-decoration: line-through;
+}
+
+.lilac-detail-row-done .lilac-detail-marker {
+	color: var(--text-success, #4caf50);
 }

@@ -183,8 +183,11 @@ export class LilacDatabase {
 	}
 
 	/**
-	 * Pending todos with a `due` or `do_date` falling in [startISO, endISO].
-	 * Todos with neither (SPEC §2's "상시" bucket) are intentionally excluded —
+	 * Todos (done and pending alike) with a `due` or `do_date` falling in
+	 * [startISO, endISO]. Both states are returned because the calendar needs to
+	 * tell "finished everything that day" (✓) apart from "nothing was due that
+	 * day" (blank) — see lilac DECISIONS 2026-06-07 (Todomate-style day badge).
+	 * Todos with neither date (SPEC §2's "상시" bucket) are intentionally excluded —
 	 * they don't belong to a specific date, so they don't fit a date grid
 	 * (handled separately, see lilac STATE "상시" notes / Phase 5).
 	 */
@@ -192,7 +195,7 @@ export class LilacDatabase {
 		const result = this.db.exec(
 			`SELECT path, type, title, category, due, do_date, done, done_date, link
 			 FROM items
-			 WHERE type = 'todo' AND done = 0
+			 WHERE type = 'todo'
 			   AND (
 			        (due IS NOT NULL AND due BETWEEN ? AND ?)
 			     OR (do_date IS NOT NULL AND do_date BETWEEN ? AND ?)
