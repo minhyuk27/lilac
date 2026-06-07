@@ -75,6 +75,10 @@
 	display: grid;
 	grid-template-columns: repeat(7, 1fr);
 	border-top: 1px solid var(--background-modifier-border);
+	/* Contain bands within their own week row — without this, a band that's even a
+	   fraction taller/wider than its grid area can spill into neighboring rows/cells
+	   and visually "cut across" the grid ("일정 막대가 달력을 잘라버려"). */
+	overflow: hidden;
 }
 
 .lilac-reference-week {

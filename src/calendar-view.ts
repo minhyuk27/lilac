@@ -358,7 +358,13 @@ export class LilacCalendarView extends ItemView {
 	}
 
 	private dayOffset(weekStart: Date, iso: string): number {
-		return Math.round((parseISO(iso).getTime() - weekStart.getTime()) / 86_400_000);
+		// weekStart carries whatever time-of-day `new Date()` had when the view was opened
+		// (addDays preserves it), while parseISO(iso) is always midnight. Diffing the two
+		// directly leaves a leftover of up to ~24h, and Math.round lands on the wrong day
+		// once that leftover passes 12h — e.g. a 7/9 due date rendered under the 7/8 cell.
+		// Normalize weekStart to midnight first so the difference is an exact day count.
+		const weekStartMidnight = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());
+		return Math.round((parseISO(iso).getTime() - weekStartMidnight.getTime()) / 86_400_000);
 	}
 
 	private isVisible(item: ScheduleItem, category: Category | null): boolean {
