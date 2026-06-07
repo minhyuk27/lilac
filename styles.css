@@ -4,6 +4,12 @@
 	gap: 0.7em;
 	height: 100%;
 	overflow-y: auto;
+	/* Obsidian mobile draws its own bottom tab bar / gesture bar over the view —
+	   without room to scroll past it, the last bit of content (day-detail panel)
+	   sits underneath and reads as "잘려서 보임". `env(safe-area-inset-bottom)`
+	   covers notches/home-indicators; the flat 1.5em is the tab bar itself, which
+	   isn't exposed as a safe-area inset. */
+	padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5em);
 }
 
 .lilac-calendar-header {
@@ -74,11 +80,8 @@
 .lilac-calendar-week {
 	display: grid;
 	grid-template-columns: repeat(7, 1fr);
+	grid-template-rows: minmax(5em, 1fr);
 	border-top: 1px solid var(--background-modifier-border);
-	/* Contain bands within their own week row — without this, a band that's even a
-	   fraction taller/wider than its grid area can spill into neighboring rows/cells
-	   and visually "cut across" the grid ("일정 막대가 달력을 잘라버려"). */
-	overflow: hidden;
 }
 
 .lilac-reference-week {
@@ -89,6 +92,14 @@
 	min-height: 0;
 	min-width: 0;
 	padding: 0.25em 0.3em;
+	/* Reserve the same corner that `.lilac-band` floats over (see renderGrid) so the
+	   date number/chips always start below the deepest possible band, in every cell —
+	   whether or not *this* week actually has a band there. That's what keeps every
+	   week the same height (no more "한 줄이 더 생기는" rows) AND keeps the cell's own
+	   border-right/border-top spanning its full height — one continuous bordered grid,
+	   with bands floating on top of it, instead of a separate borderless lane strip
+	   that visually cuts the grid into pieces ("막대 공간 때문에 달력이 끊어져 보여"). */
+	padding-top: calc(var(--lilac-band-area, 0em) + 0.25em);
 	display: flex;
 	flex-direction: column;
 	gap: 0.2em;
@@ -151,21 +162,28 @@
 	color: var(--text-accent);
 }
 
-/* Bands: placed via explicit grid-column/-row spans (see calendar-view.ts) so they
-   read as one continuous bar across the days they cover — no seams between cells.
-   Sizing is in flex/height rather than line-height so the rendered height is fixed
-   and predictable (see the row-track comment in calendar-view.ts: both this height
-   and that track size scale off the same inherited font-size, so the band can never
-   grow taller than its lane and get clipped — a clipped bottom edge was itself
-   reading as "깨져"/"잘라버려", a chopped-off bar). */
+/* Bands float *over* the day cells rather than living in a row of their own — they
+   share `grid-row: 1` with `.lilac-calendar-cell` (explicit grid-column spans place
+   them across the days they cover, reading as one continuous bar with no seams).
+   `align-self: start` + `margin-top` (set per-band in calendar-view.ts, from its lane
+   index × the same LANE_HEIGHT_EM the cells reserve as padding-top) stacks lanes
+   without overlapping each other or the cell content beneath. The raised z-index
+   keeps clicks landing on the band — not the cell underneath — within its area; it's
+   created after the cells in the DOM for the same reason (paint order). Fixed flex
+   height (not line-height) keeps the rendered size predictable so it always fits
+   inside the corner the cells reserved for it — it can't grow into the cell's own
+   content and "자르는" look that gave. */
 .lilac-band {
 	display: flex;
 	align-items: center;
+	align-self: start;
+	grid-row: 1;
+	z-index: 1;
 	height: 1.6em;
 	box-sizing: border-box;
 	min-width: 0;
 	max-width: 100%;
-	margin: 0.1em 0.15em;
+	margin: 0 0.15em;
 	padding: 0 0.5em;
 	font-size: 0.68em;
 	font-weight: 600;

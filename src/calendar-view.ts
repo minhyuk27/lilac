@@ -29,6 +29,9 @@ interface BandPlacement extends Occurrence {
 
 const MAX_CHIPS_PER_DAY = 3;
 
+/** Height of one band lane, in em (matches the per-lane offset math in renderGrid/styles.css). */
+const LANE_HEIGHT_EM = 1.6;
+
 /** How many of a day's todos are still pending vs. already finished — drives the day badge. */
 interface TodoDaySummary {
 	pending: number;
@@ -147,12 +150,24 @@ export class LilacCalendarView extends ItemView {
 
 		// First pass: place bands for every week, and find the largest lane count across
 		// ALL of them — see lilac DECISIONS 2026-06-07 ("일정있는 열이 달력칸을 나누는
-		// 표를 벌려서 한 줄이 더 생기는 식"): computing the row template per-week meant
-		// weeks with period events reserved extra lane rows while weeks without them
-		// didn't, so week rows ended up different heights and the grid's horizontal
-		// dividing lines looked uneven/pushed apart. Reserving the same fixed band-lane
-		// space in every row — even when a given week has nothing to show there — keeps
-		// every week row the same height, exactly like Google/Samsung Calendar.
+		// 표를 벌려서 한 줄이 더 생기는 식" / "막대 공간 때문에 달력이 끊어져 보여").
+		// Two problems came from the same root: giving bands their own grid row(s)
+		// separate from the day cells. (a) Only weeks that actually had bands grew
+		// taller, so week rows ended up different heights. (b) Even after equalizing
+		// that, the reserved lane row sat as a borderless strip *above* the bordered
+		// cell row — visually reading as a seam that cut each week off from the next,
+		// instead of one continuous grid.
+		//
+		// The fix for both: bands are no longer separate grid rows at all. Every week
+		// is a single uniform row of full-height cells (so all six weeks are always
+		// identical, structurally — not just numerically equal). Bands are laid into
+		// that *same* row, on top of the cells (`grid-row: 1`, `align-self: start`,
+		// raised z-index), nudged down by `lane * LANE_HEIGHT_EM` so stacked bands don't
+		// overlap. Each cell reserves that same lane space as `padding-top` (the
+		// `--lilac-band-area` custom property below) so its date number/chips start
+		// below wherever the deepest band would reach — exactly like Google/Samsung
+		// Calendar's all-day-event strip floats over the top of the day cells rather
+		// than living in a row of its own.
 		const weeks = Array.from({ length: GRID_WEEKS }, (_, week) => {
 			const weekStart = addDays(gridStart, week * 7);
 			const weekStartISO = toISO(weekStart);
@@ -160,31 +175,11 @@ export class LilacCalendarView extends ItemView {
 			return { weekStart, bands: this.placeBands(occurrences, weekStart, weekStartISO, weekEndISO) };
 		});
 		const laneCount = Math.max(0, ...weeks.map((w) => Math.max(0, ...w.bands.map((b) => b.lane + 1))));
-		// CSS custom properties can't drive repeat()'s count, so build the track list directly:
-		// one fixed-height row per band lane, then a flexible row for the day cells. The band's
-		// own height (.lilac-band) and this track height both scale off the same inherited
-		// font-size at a fixed ratio, so a band can never be taller than its lane and get
-		// clipped by the row's overflow:hidden.
-		const rowTemplate = `${"1.9em ".repeat(laneCount)}minmax(5em, 1fr)`;
+		grid.style.setProperty("--lilac-band-area", `${laneCount * LANE_HEIGHT_EM}em`);
 
 		weeks.forEach(({ weekStart, bands }, week) => {
 			const weekEl = grid.createDiv({ cls: "lilac-calendar-week" });
 			if (week === REFERENCE_ROW) weekEl.addClass("lilac-reference-week");
-			weekEl.style.gridTemplateRows = rowTemplate;
-
-			for (const band of bands) {
-				const el = weekEl.createDiv({ cls: "lilac-band" });
-				if (!band.isStart) el.addClass("lilac-band-continues-left");
-				if (!band.isEnd) el.addClass("lilac-band-continues-right");
-				el.style.gridColumn = `${band.startCol + 1} / ${band.endCol + 2}`;
-				el.style.gridRow = `${band.lane + 1}`;
-				if (band.category) el.style.setProperty("--lilac-chip-color", band.category.color);
-				el.setText(band.item.title);
-				el.onclick = (e) => {
-					e.stopPropagation();
-					void this.openItemTarget(band.item);
-				};
-			}
 
 			const chipsByCol = this.collectDayChips(occurrences, weekStart);
 
@@ -193,7 +188,6 @@ export class LilacCalendarView extends ItemView {
 				const dateISO = toISO(date);
 				const cell = weekEl.createDiv({ cls: "lilac-calendar-cell" });
 				cell.style.gridColumn = `${day + 1}`;
-				cell.style.gridRow = `${laneCount + 1}`;
 				if (day === 0) cell.addClass("lilac-sunday");
 				if (day === 6) cell.addClass("lilac-saturday");
 				if (isSameDay(date, today)) cell.addClass("lilac-today");
@@ -229,8 +223,29 @@ export class LilacCalendarView extends ItemView {
 				const visible = entries.slice(0, MAX_CHIPS_PER_DAY);
 				for (const entry of visible) this.renderEventChip(cell, entry);
 				if (entries.length > visible.length) {
-					cell.createDiv({ cls: "lilac-cell-more", text: `+${entries.length - visible.length}개` });
+					cell.createDiv({ cls: "lilac-cell-more", text: `+${entries.length - visible.length}` });
 				}
+			}
+
+			// Bands are created *after* the cells (and `.lilac-band` carries a higher
+			// z-index — see styles.css) so they paint on top of the cells' empty
+			// reserved corner instead of being painted over and stealing none of the
+			// cells' click handling. `marginTop` — not `gridRow` — is what stacks lanes:
+			// every band shares `grid-row: 1` with the cells it overlaps, and is nudged
+			// down by its own lane index so multiple bands in the same week don't overlap
+			// each other while still floating within the cells' reserved corner.
+			for (const band of bands) {
+				const el = weekEl.createDiv({ cls: "lilac-band" });
+				if (!band.isStart) el.addClass("lilac-band-continues-left");
+				if (!band.isEnd) el.addClass("lilac-band-continues-right");
+				el.style.gridColumn = `${band.startCol + 1} / ${band.endCol + 2}`;
+				el.style.marginTop = `${band.lane * LANE_HEIGHT_EM + 0.1}em`;
+				if (band.category) el.style.setProperty("--lilac-chip-color", band.category.color);
+				el.setText(band.item.title);
+				el.onclick = (e) => {
+					e.stopPropagation();
+					void this.openItemTarget(band.item);
+				};
 			}
 		});
 	}
