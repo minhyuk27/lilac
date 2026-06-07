@@ -1,5 +1,5 @@
 import initSqlJs, { Database, SqlValue } from "sql.js";
-import { LilacItem, ScheduleItem, Category, Recurrence, ScheduleKind } from "./types";
+import { LilacItem, ScheduleItem, TodoItem, Category, Recurrence, ScheduleKind } from "./types";
 
 function str(v: SqlValue): string | null {
 	return typeof v === "string" ? v : null;
@@ -22,6 +22,21 @@ function rowToScheduleItem(row: SqlValue[]): ScheduleItem {
 		calendar_visible: row[13] === null ? null : row[13] === 1,
 		link: str(row[14]),
 		recurrence: recurrenceRaw ? (JSON.parse(recurrenceRaw) as Recurrence) : null,
+	};
+}
+
+function rowToTodoItem(row: SqlValue[]): TodoItem {
+	// column order: path, type, title, category, due, do_date, done, done_date, link
+	return {
+		path: row[0] as string,
+		type: "todo",
+		title: row[2] as string,
+		category: str(row[3]),
+		due: str(row[4]),
+		do_date: str(row[5]),
+		done: row[6] === 1,
+		done_date: str(row[7]),
+		link: str(row[8]),
 	};
 }
 
@@ -165,6 +180,27 @@ export class LilacDatabase {
 		);
 		const rows = result[0]?.values ?? [];
 		return rows.map(rowToScheduleItem);
+	}
+
+	/**
+	 * Pending todos with a `due` or `do_date` falling in [startISO, endISO].
+	 * Todos with neither (SPEC §2's "상시" bucket) are intentionally excluded —
+	 * they don't belong to a specific date, so they don't fit a date grid
+	 * (handled separately, see lilac STATE "상시" notes / Phase 5).
+	 */
+	getTodoItemsInRange(startISO: string, endISO: string): TodoItem[] {
+		const result = this.db.exec(
+			`SELECT path, type, title, category, due, do_date, done, done_date, link
+			 FROM items
+			 WHERE type = 'todo' AND done = 0
+			   AND (
+			        (due IS NOT NULL AND due BETWEEN ? AND ?)
+			     OR (do_date IS NOT NULL AND do_date BETWEEN ? AND ?)
+			   )`,
+			[startISO, endISO, startISO, endISO]
+		);
+		const rows = result[0]?.values ?? [];
+		return rows.map(rowToTodoItem);
 	}
 
 	close(): void {

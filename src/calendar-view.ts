@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, TFile } from "obsidian";
 import type LilacPlugin from "../main";
-import { Category, ScheduleItem } from "./types";
+import { Category, ScheduleItem, TodoItem } from "./types";
 import { addDays, isSameDay, startOfWeek, toISO, parseISO } from "./dates";
 import { expandOccurrences } from "./recurrence";
 import { openDailyNote } from "./daily-note";
@@ -11,13 +11,23 @@ const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 const GRID_WEEKS = 6;
 const REFERENCE_ROW = 1; // SPEC §3.1: 현재 주를 항상 2번째 줄(= index 1)에 고정
 
-type BandPosition = "single" | "start" | "middle" | "end";
-
-interface DayEntry {
+/** A schedule occurrence clipped to the visible grid. Multi-day -> rendered as a band; single-day -> a chip. */
+interface Occurrence {
 	item: ScheduleItem;
 	category: Category | null;
-	bandPosition: BandPosition;
+	startISO: string;
+	endISO: string;
 }
+
+interface BandPlacement extends Occurrence {
+	startCol: number; // 0-6, column within its week
+	endCol: number; // 0-6 inclusive
+	lane: number;
+}
+
+type ChipEntry =
+	| { kind: "schedule"; item: ScheduleItem; category: Category | null }
+	| { kind: "todo"; item: TodoItem; category: Category | null };
 
 export class LilacCalendarView extends ItemView {
 	private referenceWeekStart: Date;
@@ -75,9 +85,10 @@ export class LilacCalendarView extends ItemView {
 		const header = container.createDiv({ cls: "lilac-calendar-header" });
 
 		const nav = header.createDiv({ cls: "lilac-calendar-nav" });
-		nav.createEl("button", { cls: "lilac-nav-btn", text: "‹" }).onclick = () => this.shiftWeeks(-1);
+		// Up/down: a "rolling" week grid scrolls vertically through time, not sideways through months.
+		nav.createEl("button", { cls: "lilac-nav-btn", text: "▲" }).onclick = () => this.shiftWeeks(-1);
 		nav.createEl("button", { cls: "lilac-nav-btn lilac-today-btn", text: "오늘" }).onclick = () => this.goToToday();
-		nav.createEl("button", { cls: "lilac-nav-btn", text: "›" }).onclick = () => this.shiftWeeks(1);
+		nav.createEl("button", { cls: "lilac-nav-btn", text: "▼" }).onclick = () => this.shiftWeeks(1);
 
 		const gridStart = this.gridStart();
 		const gridEnd = addDays(gridStart, GRID_WEEKS * 7 - 1);
@@ -95,7 +106,7 @@ export class LilacCalendarView extends ItemView {
 	private renderGrid(container: HTMLElement): void {
 		const grid = container.createDiv({ cls: "lilac-calendar-grid" });
 
-		const weekdayRow = grid.createDiv({ cls: "lilac-calendar-row lilac-calendar-weekdays" });
+		const weekdayRow = grid.createDiv({ cls: "lilac-calendar-weekdays" });
 		WEEKDAY_LABELS.forEach((label, i) => {
 			const cell = weekdayRow.createDiv({ cls: "lilac-calendar-weekday", text: label });
 			if (i === 0) cell.addClass("lilac-sunday");
@@ -104,52 +115,81 @@ export class LilacCalendarView extends ItemView {
 
 		const gridStart = this.gridStart();
 		const gridEnd = addDays(gridStart, GRID_WEEKS * 7 - 1);
+		const gridStartISO = toISO(gridStart);
+		const gridEndISO = toISO(gridEnd);
+
 		const db = this.plugin.getDatabase();
-		const items = db?.getScheduleItemsOverlapping(toISO(gridStart), toISO(gridEnd)) ?? [];
 		const categoryById = new Map((db?.getCategories() ?? []).map((c) => [c.id, c]));
-		const entriesByDate = this.buildEntriesByDate(items, categoryById, gridStart, gridEnd);
+		const scheduleOccurrences = this.buildOccurrences(
+			db?.getScheduleItemsOverlapping(gridStartISO, gridEndISO) ?? [],
+			categoryById,
+			gridStartISO,
+			gridEndISO
+		);
+		const todos = (db?.getTodoItemsInRange(gridStartISO, gridEndISO) ?? []).filter((t) =>
+			this.isCategoryVisible(t.category ? categoryById.get(t.category) ?? null : null)
+		);
 
 		const today = new Date();
 
 		for (let week = 0; week < GRID_WEEKS; week++) {
-			const row = grid.createDiv({ cls: "lilac-calendar-row" });
-			if (week === REFERENCE_ROW) row.addClass("lilac-reference-week");
+			const weekStart = addDays(gridStart, week * 7);
+			const weekStartISO = toISO(weekStart);
+			const weekEndISO = toISO(addDays(weekStart, 6));
+
+			const bands = this.placeBands(scheduleOccurrences, weekStart, weekStartISO, weekEndISO);
+			const laneCount = Math.max(0, ...bands.map((b) => b.lane + 1));
+
+			const weekEl = grid.createDiv({ cls: "lilac-calendar-week" });
+			if (week === REFERENCE_ROW) weekEl.addClass("lilac-reference-week");
+			// CSS custom properties can't drive repeat()'s count, so build the track list directly:
+			// one fixed-height row per band lane, then a flexible row for the day cells.
+			weekEl.style.gridTemplateRows = `${"1.4em ".repeat(laneCount)}minmax(5em, 1fr)`;
+
+			for (const band of bands) {
+				const el = weekEl.createDiv({ cls: "lilac-band" });
+				el.style.gridColumn = `${band.startCol + 1} / ${band.endCol + 2}`;
+				el.style.gridRow = `${band.lane + 1}`;
+				if (band.category) el.style.setProperty("--lilac-chip-color", band.category.color);
+				el.setText(band.item.title);
+				el.onclick = () => void this.openItemTarget(band.item);
+			}
+
+			const chipsByCol = this.collectDayChips(scheduleOccurrences, todos, weekStart);
 
 			for (let day = 0; day < 7; day++) {
-				const date = addDays(gridStart, week * 7 + day);
-				const iso = toISO(date);
-				const cell = row.createDiv({ cls: "lilac-calendar-cell" });
+				const date = addDays(weekStart, day);
+				const cell = weekEl.createDiv({ cls: "lilac-calendar-cell" });
+				cell.style.gridColumn = `${day + 1}`;
+				cell.style.gridRow = `${laneCount + 1}`;
 				if (day === 0) cell.addClass("lilac-sunday");
 				if (day === 6) cell.addClass("lilac-saturday");
 				if (isSameDay(date, today)) cell.addClass("lilac-today");
 
-				const dateLabel = cell.createDiv({ cls: "lilac-cell-date", text: String(date.getDate()) });
+				const dateLabel = cell.createDiv({ cls: "lilac-cell-date", text: this.formatDateLabel(date) });
+				if (date.getDate() === 1) dateLabel.addClass("lilac-month-start");
 				dateLabel.onclick = () => void openDailyNote(this.app, date);
 
 				const entryList = cell.createDiv({ cls: "lilac-cell-entries" });
-				for (const entry of entriesByDate.get(iso) ?? []) {
+				for (const entry of chipsByCol.get(day) ?? []) {
 					this.renderChip(entryList, entry);
 				}
 			}
 		}
 	}
 
-	private buildEntriesByDate(
+	/** "7" normally, but "6/1" on the 1st of a month — marks month boundaries in the rolling grid. */
+	private formatDateLabel(date: Date): string {
+		return date.getDate() === 1 ? `${date.getMonth() + 1}/${date.getDate()}` : String(date.getDate());
+	}
+
+	private buildOccurrences(
 		items: ScheduleItem[],
 		categoryById: Map<string, Category>,
-		gridStart: Date,
-		gridEnd: Date
-	): Map<string, DayEntry[]> {
-		const gridStartISO = toISO(gridStart);
-		const gridEndISO = toISO(gridEnd);
-		const map = new Map<string, DayEntry[]>();
-
-		const push = (iso: string, entry: DayEntry) => {
-			if (iso < gridStartISO || iso > gridEndISO) return;
-			const list = map.get(iso);
-			if (list) list.push(entry);
-			else map.set(iso, [entry]);
-		};
+		gridStartISO: string,
+		gridEndISO: string
+	): Occurrence[] {
+		const occurrences: Occurrence[] = [];
 
 		for (const item of items) {
 			const category = item.category ? categoryById.get(item.category) ?? null : null;
@@ -157,7 +197,7 @@ export class LilacCalendarView extends ItemView {
 
 			if (item.recurrence && item.start) {
 				for (const iso of expandOccurrences(item.recurrence, item.start, gridStartISO, gridEndISO)) {
-					push(iso, { item, category, bandPosition: "single" });
+					occurrences.push({ item, category, startISO: iso, endISO: iso });
 				}
 				continue;
 			}
@@ -165,46 +205,101 @@ export class LilacCalendarView extends ItemView {
 			if (item.schedule_kind === "period" && item.start) {
 				const itemStart = item.start;
 				const itemEnd = item.end ?? item.start;
-				const rangeStart = itemStart > gridStartISO ? itemStart : gridStartISO;
-				const rangeEnd = itemEnd < gridEndISO ? itemEnd : gridEndISO;
-
-				let cursor = parseISO(rangeStart);
-				const endDate = parseISO(rangeEnd);
-				while (cursor <= endDate) {
-					const iso = toISO(cursor);
-					const position: BandPosition =
-						iso === itemStart && iso === itemEnd ? "single" : iso === itemStart ? "start" : iso === itemEnd ? "end" : "middle";
-					push(iso, { item, category, bandPosition: position });
-					cursor = addDays(cursor, 1);
-				}
+				const startISO = itemStart > gridStartISO ? itemStart : gridStartISO;
+				const endISO = itemEnd < gridEndISO ? itemEnd : gridEndISO;
+				if (startISO <= endISO) occurrences.push({ item, category, startISO, endISO });
 			} else if (item.start) {
-				push(item.start, { item, category, bandPosition: "single" });
+				occurrences.push({ item, category, startISO: item.start, endISO: item.start });
 			}
+		}
+		return occurrences;
+	}
+
+	/** Multi-day occurrences within this week, packed into non-overlapping lanes (greedy interval packing). */
+	private placeBands(occurrences: Occurrence[], weekStart: Date, weekStartISO: string, weekEndISO: string): BandPlacement[] {
+		const spanning = occurrences
+			.filter((o) => o.startISO !== o.endISO && o.endISO >= weekStartISO && o.startISO <= weekEndISO)
+			.map((o) => {
+				const startCol = Math.max(0, this.dayOffset(weekStart, o.startISO));
+				const endCol = Math.min(6, this.dayOffset(weekStart, o.endISO));
+				return { ...o, startCol, endCol, lane: 0 };
+			})
+			.sort((a, b) => a.startCol - b.startCol || b.endCol - a.endCol);
+
+		const laneEnds: number[] = [];
+		for (const band of spanning) {
+			let lane = laneEnds.findIndex((end) => end < band.startCol);
+			if (lane === -1) lane = laneEnds.length;
+			laneEnds[lane] = band.endCol;
+			band.lane = lane;
+		}
+		return spanning;
+	}
+
+	/** Single-day schedule occurrences + todos for this week, grouped by weekday column (0=Sun..6=Sat). */
+	private collectDayChips(occurrences: Occurrence[], todos: TodoItem[], weekStart: Date): Map<number, ChipEntry[]> {
+		const map = new Map<number, ChipEntry[]>();
+		const push = (col: number, entry: ChipEntry) => {
+			const list = map.get(col);
+			if (list) list.push(entry);
+			else map.set(col, [entry]);
+		};
+
+		for (const occ of occurrences) {
+			if (occ.startISO !== occ.endISO) continue; // bands handled separately
+			const col = this.dayOffset(weekStart, occ.startISO);
+			if (col >= 0 && col <= 6) push(col, { kind: "schedule", item: occ.item, category: occ.category });
+		}
+
+		for (const todo of todos) {
+			const dateISO = todo.do_date ?? todo.due;
+			if (!dateISO) continue;
+			const col = this.dayOffset(weekStart, dateISO);
+			if (col >= 0 && col <= 6) push(col, { kind: "todo", item: todo, category: null });
 		}
 
 		for (const list of map.values()) {
-			list.sort((a, b) => (a.item.time_start ?? "").localeCompare(b.item.time_start ?? "") || a.item.title.localeCompare(b.item.title));
+			list.sort((a, b) => this.chipSortKey(a).localeCompare(this.chipSortKey(b)));
 		}
 		return map;
 	}
 
-	private isVisible(item: ScheduleItem, category: Category | null): boolean {
-		if (item.calendar_visible !== null) return item.calendar_visible;
-		if (category) return category.calendar_visible;
-		return true;
+	private chipSortKey(entry: ChipEntry): string {
+		const time = entry.kind === "schedule" ? entry.item.time_start ?? "" : "";
+		return `${time}_${entry.item.title}`;
 	}
 
-	private renderChip(container: HTMLElement, entry: DayEntry): void {
-		const { item, category, bandPosition } = entry;
-		const chip = container.createDiv({ cls: `lilac-chip lilac-chip-${bandPosition}` });
-		if (category) chip.style.setProperty("--lilac-chip-color", category.color);
+	private dayOffset(weekStart: Date, iso: string): number {
+		return Math.round((parseISO(iso).getTime() - weekStart.getTime()) / 86_400_000);
+	}
 
-		const label = item.schedule_kind === "time" && item.time_start ? `${item.time_start} ${item.title}` : item.title;
-		chip.setText(label);
+	private isVisible(item: ScheduleItem, category: Category | null): boolean {
+		if (item.calendar_visible !== null) return item.calendar_visible;
+		return this.isCategoryVisible(category);
+	}
+
+	private isCategoryVisible(category: Category | null): boolean {
+		return category ? category.calendar_visible : true;
+	}
+
+	private renderChip(container: HTMLElement, entry: ChipEntry): void {
+		if (entry.kind === "schedule") {
+			const { item, category } = entry;
+			const chip = container.createDiv({ cls: "lilac-chip lilac-chip-event" });
+			if (category) chip.style.setProperty("--lilac-chip-color", category.color);
+			chip.setText(item.schedule_kind === "time" && item.time_start ? `${item.time_start} ${item.title}` : item.title);
+			chip.onclick = () => void this.openItemTarget(item);
+			return;
+		}
+
+		const { item } = entry;
+		const chip = container.createDiv({ cls: "lilac-chip lilac-chip-todo" });
+		const marker = item.do_date ? "▸" : "⏰"; // do_date = 실행 예정일, due-only = 마감 임박 표시
+		chip.setText(`${marker} ${item.title}`);
 		chip.onclick = () => void this.openItemTarget(item);
 	}
 
-	private async openItemTarget(item: ScheduleItem): Promise<void> {
+	private async openItemTarget(item: ScheduleItem | TodoItem): Promise<void> {
 		const linkpath = item.link ? this.extractLinkpath(item.link) : item.path;
 		const dest = this.app.metadataCache.getFirstLinkpathDest(linkpath, item.path) ?? this.app.vault.getAbstractFileByPath(item.path);
 		if (dest instanceof TFile) await this.app.workspace.getLeaf(false).openFile(dest);
