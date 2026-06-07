@@ -1,7 +1,7 @@
 import { ItemView, WorkspaceLeaf, TFile } from "obsidian";
 import type LilacPlugin from "../main";
 import { Category, ScheduleItem, TodoItem } from "./types";
-import { addDays, isSameDay, startOfWeek, toISO, parseISO } from "./dates";
+import { addDays, isSameDay, startOfWeek, toISO, parseISO, todayISO } from "./dates";
 import { expandOccurrences } from "./recurrence";
 import { openDailyNote } from "./daily-note";
 
@@ -31,10 +31,12 @@ type ChipEntry =
 
 export class LilacCalendarView extends ItemView {
 	private referenceWeekStart: Date;
+	private selectedDateISO: string;
 
 	constructor(leaf: WorkspaceLeaf, private plugin: LilacPlugin) {
 		super(leaf);
 		this.referenceWeekStart = startOfWeek(new Date());
+		this.selectedDateISO = todayISO();
 	}
 
 	getViewType(): string {
@@ -77,11 +79,29 @@ export class LilacCalendarView extends ItemView {
 		container.empty();
 		container.addClass("lilac-calendar");
 
-		this.renderHeader(container);
-		this.renderGrid(container);
+		const gridStart = this.gridStart();
+		const gridEnd = addDays(gridStart, GRID_WEEKS * 7 - 1);
+		const gridStartISO = toISO(gridStart);
+		const gridEndISO = toISO(gridEnd);
+
+		const db = this.plugin.getDatabase();
+		const categoryById = new Map((db?.getCategories() ?? []).map((c) => [c.id, c]));
+		const occurrences = this.buildOccurrences(
+			db?.getScheduleItemsOverlapping(gridStartISO, gridEndISO) ?? [],
+			categoryById,
+			gridStartISO,
+			gridEndISO
+		);
+		const todos = (db?.getTodoItemsInRange(gridStartISO, gridEndISO) ?? []).filter((t) =>
+			this.isCategoryVisible(t.category ? categoryById.get(t.category) ?? null : null)
+		);
+
+		this.renderHeader(container, gridStart, gridEnd);
+		this.renderGrid(container, gridStart, occurrences, todos);
+		this.renderDayDetail(container, occurrences, todos);
 	}
 
-	private renderHeader(container: HTMLElement): void {
+	private renderHeader(container: HTMLElement, gridStart: Date, gridEnd: Date): void {
 		const header = container.createDiv({ cls: "lilac-calendar-header" });
 
 		const nav = header.createDiv({ cls: "lilac-calendar-nav" });
@@ -90,8 +110,6 @@ export class LilacCalendarView extends ItemView {
 		nav.createEl("button", { cls: "lilac-nav-btn lilac-today-btn", text: "오늘" }).onclick = () => this.goToToday();
 		nav.createEl("button", { cls: "lilac-nav-btn", text: "▼" }).onclick = () => this.shiftWeeks(1);
 
-		const gridStart = this.gridStart();
-		const gridEnd = addDays(gridStart, GRID_WEEKS * 7 - 1);
 		header.createDiv({ cls: "lilac-calendar-label", text: this.formatRangeLabel(gridStart, gridEnd) });
 	}
 
@@ -103,7 +121,7 @@ export class LilacCalendarView extends ItemView {
 		return `${start.getFullYear()}.${start.getMonth() + 1} – ${end.getFullYear()}.${end.getMonth() + 1}`;
 	}
 
-	private renderGrid(container: HTMLElement): void {
+	private renderGrid(container: HTMLElement, gridStart: Date, occurrences: Occurrence[], todos: TodoItem[]): void {
 		const grid = container.createDiv({ cls: "lilac-calendar-grid" });
 
 		const weekdayRow = grid.createDiv({ cls: "lilac-calendar-weekdays" });
@@ -113,23 +131,6 @@ export class LilacCalendarView extends ItemView {
 			if (i === 6) cell.addClass("lilac-saturday");
 		});
 
-		const gridStart = this.gridStart();
-		const gridEnd = addDays(gridStart, GRID_WEEKS * 7 - 1);
-		const gridStartISO = toISO(gridStart);
-		const gridEndISO = toISO(gridEnd);
-
-		const db = this.plugin.getDatabase();
-		const categoryById = new Map((db?.getCategories() ?? []).map((c) => [c.id, c]));
-		const scheduleOccurrences = this.buildOccurrences(
-			db?.getScheduleItemsOverlapping(gridStartISO, gridEndISO) ?? [],
-			categoryById,
-			gridStartISO,
-			gridEndISO
-		);
-		const todos = (db?.getTodoItemsInRange(gridStartISO, gridEndISO) ?? []).filter((t) =>
-			this.isCategoryVisible(t.category ? categoryById.get(t.category) ?? null : null)
-		);
-
 		const today = new Date();
 
 		for (let week = 0; week < GRID_WEEKS; week++) {
@@ -137,7 +138,7 @@ export class LilacCalendarView extends ItemView {
 			const weekStartISO = toISO(weekStart);
 			const weekEndISO = toISO(addDays(weekStart, 6));
 
-			const bands = this.placeBands(scheduleOccurrences, weekStart, weekStartISO, weekEndISO);
+			const bands = this.placeBands(occurrences, weekStart, weekStartISO, weekEndISO);
 			const laneCount = Math.max(0, ...bands.map((b) => b.lane + 1));
 
 			const weekEl = grid.createDiv({ cls: "lilac-calendar-week" });
@@ -152,23 +153,33 @@ export class LilacCalendarView extends ItemView {
 				el.style.gridRow = `${band.lane + 1}`;
 				if (band.category) el.style.setProperty("--lilac-chip-color", band.category.color);
 				el.setText(band.item.title);
-				el.onclick = () => void this.openItemTarget(band.item);
+				el.onclick = (e) => {
+					e.stopPropagation();
+					void this.openItemTarget(band.item);
+				};
 			}
 
-			const chipsByCol = this.collectDayChips(scheduleOccurrences, todos, weekStart);
+			const chipsByCol = this.collectDayChips(occurrences, todos, weekStart);
 
 			for (let day = 0; day < 7; day++) {
 				const date = addDays(weekStart, day);
+				const dateISO = toISO(date);
 				const cell = weekEl.createDiv({ cls: "lilac-calendar-cell" });
 				cell.style.gridColumn = `${day + 1}`;
 				cell.style.gridRow = `${laneCount + 1}`;
 				if (day === 0) cell.addClass("lilac-sunday");
 				if (day === 6) cell.addClass("lilac-saturday");
 				if (isSameDay(date, today)) cell.addClass("lilac-today");
+				if (dateISO === this.selectedDateISO) cell.addClass("lilac-selected");
+				// Tapping the cell selects the day (-> full agenda below); the date number opens the daily note.
+				cell.onclick = () => this.selectDate(dateISO);
 
 				const dateLabel = cell.createDiv({ cls: "lilac-cell-date", text: this.formatDateLabel(date) });
 				if (date.getDate() === 1) dateLabel.addClass("lilac-month-start");
-				dateLabel.onclick = () => void openDailyNote(this.app, date);
+				dateLabel.onclick = (e) => {
+					e.stopPropagation();
+					void openDailyNote(this.app, date);
+				};
 
 				const entryList = cell.createDiv({ cls: "lilac-cell-entries" });
 				for (const entry of chipsByCol.get(day) ?? []) {
@@ -176,6 +187,83 @@ export class LilacCalendarView extends ItemView {
 				}
 			}
 		}
+	}
+
+	private selectDate(dateISO: string): void {
+		if (this.selectedDateISO === dateISO) return;
+		this.selectedDateISO = dateISO;
+		this.render();
+	}
+
+	/**
+	 * Full-text agenda for the selected day — mirrors how Google/Samsung Calendar show a day's
+	 * events below the month grid. The grid cells are too narrow on mobile to show full titles
+	 * (see lilac STATE — "아이콘만 보이고 내용이 안 보여"), so this panel is the place that
+	 * always shows complete information regardless of screen width.
+	 */
+	private renderDayDetail(container: HTMLElement, occurrences: Occurrence[], todos: TodoItem[]): void {
+		const dateISO = this.selectedDateISO;
+		const date = parseISO(dateISO);
+		const panel = container.createDiv({ cls: "lilac-day-detail" });
+
+		const header = panel.createDiv({ cls: "lilac-day-detail-header" });
+		const label = header.createDiv({ cls: "lilac-day-detail-date", text: this.formatFullDateLabel(date) });
+		label.onclick = () => void openDailyNote(this.app, date);
+
+		const list = panel.createDiv({ cls: "lilac-day-detail-list" });
+		const dayOccurrences = occurrences.filter((o) => dateISO >= o.startISO && dateISO <= o.endISO);
+		const dayTodos = todos.filter((t) => t.due === dateISO || t.do_date === dateISO);
+
+		if (dayOccurrences.length === 0 && dayTodos.length === 0) {
+			list.createDiv({ cls: "lilac-day-detail-empty", text: "일정이 없습니다" });
+			return;
+		}
+
+		type Row = { sortKey: string; render: (parent: HTMLElement) => void };
+		const rows: Row[] = [];
+
+		for (const occ of dayOccurrences) {
+			rows.push({
+				sortKey: `0_${occ.item.time_start ?? ""}_${occ.item.title}`,
+				render: (parent) => {
+					const row = parent.createDiv({ cls: "lilac-detail-row" });
+					const dot = row.createDiv({ cls: "lilac-detail-dot" });
+					if (occ.category) dot.style.setProperty("--lilac-chip-color", occ.category.color);
+					const text = row.createDiv({ cls: "lilac-detail-text" });
+					const timeLabel =
+						occ.item.schedule_kind === "time" && occ.item.time_start
+							? occ.item.time_start + (occ.item.time_end ? `–${occ.item.time_end}` : "")
+							: occ.item.schedule_kind === "period" && occ.startISO !== occ.endISO
+							? "기간 일정"
+							: "종일";
+					text.createSpan({ cls: "lilac-detail-time", text: timeLabel });
+					text.createSpan({ cls: "lilac-detail-title", text: occ.item.title });
+					row.onclick = () => void this.openItemTarget(occ.item);
+				},
+			});
+		}
+
+		for (const todo of dayTodos) {
+			rows.push({
+				sortKey: `1_${todo.title}`,
+				render: (parent) => {
+					const row = parent.createDiv({ cls: "lilac-detail-row lilac-detail-row-todo" });
+					row.createDiv({ cls: "lilac-detail-marker", text: todo.do_date === dateISO ? "▸" : "⏰" });
+					const text = row.createDiv({ cls: "lilac-detail-text" });
+					text.createSpan({ cls: "lilac-detail-time", text: todo.do_date === dateISO ? "실행 예정" : "마감" });
+					text.createSpan({ cls: "lilac-detail-title", text: todo.title });
+					row.onclick = () => void this.openItemTarget(todo);
+				},
+			});
+		}
+
+		rows.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+		for (const row of rows) row.render(list);
+	}
+
+	/** "7월 9일 (목)" — the day-detail panel has room for the full label, no abbreviation needed. */
+	private formatFullDateLabel(date: Date): string {
+		return `${date.getMonth() + 1}월 ${date.getDate()}일 (${WEEKDAY_LABELS[date.getDay()]})`;
 	}
 
 	/** "7" normally, but "6/1" on the 1st of a month — marks month boundaries in the rolling grid. */
@@ -287,16 +375,24 @@ export class LilacCalendarView extends ItemView {
 			const { item, category } = entry;
 			const chip = container.createDiv({ cls: "lilac-chip lilac-chip-event" });
 			if (category) chip.style.setProperty("--lilac-chip-color", category.color);
-			chip.setText(item.schedule_kind === "time" && item.time_start ? `${item.time_start} ${item.title}` : item.title);
-			chip.onclick = () => void this.openItemTarget(item);
+			const text = item.schedule_kind === "time" && item.time_start ? `${item.time_start} ${item.title}` : item.title;
+			chip.createSpan({ cls: "lilac-chip-label", text });
+			chip.onclick = (e) => {
+				e.stopPropagation();
+				void this.openItemTarget(item);
+			};
 			return;
 		}
 
 		const { item } = entry;
 		const chip = container.createDiv({ cls: "lilac-chip lilac-chip-todo" });
 		const marker = item.do_date ? "▸" : "⏰"; // do_date = 실행 예정일, due-only = 마감 임박 표시
-		chip.setText(`${marker} ${item.title}`);
-		chip.onclick = () => void this.openItemTarget(item);
+		chip.createSpan({ cls: "lilac-chip-marker", text: marker });
+		chip.createSpan({ cls: "lilac-chip-label", text: item.title });
+		chip.onclick = (e) => {
+			e.stopPropagation();
+			void this.openItemTarget(item);
+		};
 	}
 
 	private async openItemTarget(item: ScheduleItem | TodoItem): Promise<void> {
