@@ -188,6 +188,15 @@ export class LilacCalendarView extends ItemView {
 				const dateISO = toISO(date);
 				const cell = weekEl.createDiv({ cls: "lilac-calendar-cell" });
 				cell.style.gridColumn = `${day + 1}`;
+				// Must be explicit, not auto: the grid's placement algorithm positions every
+				// definitely-placed item (bands have explicit grid-row+grid-column) *before*
+				// auto-placed ones, and treats their area as occupied — so a cell with
+				// `grid-row: auto` whose column a band spans gets shoved into a brand-new
+				// implicit row instead of overlapping it (that's the "6칸씩 밀림" — those
+				// cells silently landed one row down). Giving the cell the same explicit
+				// `grid-row: 1` makes it definitely-placed too, so Grid simply lets the two
+				// overlap (paint order/z-index decide stacking) exactly as intended.
+				cell.style.gridRow = "1";
 				if (day === 0) cell.addClass("lilac-sunday");
 				if (day === 6) cell.addClass("lilac-saturday");
 				if (isSameDay(date, today)) cell.addClass("lilac-today");
