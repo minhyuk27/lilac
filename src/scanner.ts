@@ -39,6 +39,7 @@ export function parseLilacItem(app: App, file: TFile): LilacItem | null {
 		title: asString(fm.title) ?? file.basename,
 		category: asString(fm.category),
 		link: asString(fm.link),
+		memo: asString(fm.memo),
 	};
 
 	if (fm.type === "schedule") {

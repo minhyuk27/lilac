@@ -7,7 +7,8 @@ function str(v: SqlValue): string | null {
 
 function rowToScheduleItem(row: SqlValue[]): ScheduleItem {
 	// column order matches SCHEMA: path,type,title,category,schedule_kind,start,end,
-	// time_start,time_end,due,do_date,done,done_date,calendar_visible,link,recurrence
+	// time_start,time_end,due,do_date,done,done_date,calendar_visible,link,recurrence,memo
+	// (memo는 항상 SELECT 목록의 맨 끝에 붙여서 기존 인덱스가 안 밀리게 한다)
 	const recurrenceRaw = str(row[15]);
 	return {
 		path: row[0] as string,
@@ -22,11 +23,12 @@ function rowToScheduleItem(row: SqlValue[]): ScheduleItem {
 		calendar_visible: row[13] === null ? null : row[13] === 1,
 		link: str(row[14]),
 		recurrence: recurrenceRaw ? (JSON.parse(recurrenceRaw) as Recurrence) : null,
+		memo: str(row[16]),
 	};
 }
 
 function rowToTodoItem(row: SqlValue[]): TodoItem {
-	// column order: path, type, title, category, due, do_date, done, done_date, link
+	// column order: path, type, title, category, due, do_date, done, done_date, link, memo
 	return {
 		path: row[0] as string,
 		type: "todo",
@@ -37,6 +39,7 @@ function rowToTodoItem(row: SqlValue[]): TodoItem {
 		done: row[6] === 1,
 		done_date: str(row[7]),
 		link: str(row[8]),
+		memo: str(row[9]),
 	};
 }
 
@@ -52,7 +55,8 @@ CREATE TABLE items (
   done INTEGER, done_date TEXT,
   calendar_visible INTEGER,
   link TEXT,
-  recurrence TEXT
+  recurrence TEXT,
+  memo TEXT
 );
 CREATE TABLE categories (id TEXT PRIMARY KEY, name TEXT, color TEXT, calendar_visible INTEGER);
 `;
@@ -82,8 +86,8 @@ export class LilacDatabase {
 		if (item.type === "schedule") {
 			this.db.run(
 				`INSERT INTO items
-					(path, type, title, category, schedule_kind, start, "end", time_start, time_end, calendar_visible, link, recurrence)
-				 VALUES (?, 'schedule', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					(path, type, title, category, schedule_kind, start, "end", time_start, time_end, calendar_visible, link, recurrence, memo)
+				 VALUES (?, 'schedule', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				[
 					item.path,
 					item.title,
@@ -96,12 +100,13 @@ export class LilacDatabase {
 					boolToInt(item.calendar_visible),
 					item.link,
 					item.recurrence ? JSON.stringify(item.recurrence) : null,
+					item.memo,
 				]
 			);
 		} else {
 			this.db.run(
-				`INSERT INTO items (path, type, title, category, due, do_date, done, done_date, link)
-				 VALUES (?, 'todo', ?, ?, ?, ?, ?, ?, ?)`,
+				`INSERT INTO items (path, type, title, category, due, do_date, done, done_date, link, memo)
+				 VALUES (?, 'todo', ?, ?, ?, ?, ?, ?, ?, ?)`,
 				[
 					item.path,
 					item.title,
@@ -111,6 +116,7 @@ export class LilacDatabase {
 					item.done ? 1 : 0,
 					item.done_date,
 					item.link,
+					item.memo,
 				]
 			);
 		}
@@ -168,7 +174,7 @@ export class LilacDatabase {
 	getScheduleItemsOverlapping(startISO: string, endISO: string): ScheduleItem[] {
 		const result = this.db.exec(
 			`SELECT path, type, title, category, schedule_kind, start, "end", time_start,
-			        time_end, due, do_date, done, done_date, calendar_visible, link, recurrence
+			        time_end, due, do_date, done, done_date, calendar_visible, link, recurrence, memo
 			 FROM items
 			 WHERE type = 'schedule'
 			   AND (
@@ -193,7 +199,7 @@ export class LilacDatabase {
 	 */
 	getTodoItemsInRange(startISO: string, endISO: string): TodoItem[] {
 		const result = this.db.exec(
-			`SELECT path, type, title, category, due, do_date, done, done_date, link
+			`SELECT path, type, title, category, due, do_date, done, done_date, link, memo
 			 FROM items
 			 WHERE type = 'todo'
 			   AND (
@@ -201,6 +207,79 @@ export class LilacDatabase {
 			     OR (do_date IS NOT NULL AND do_date BETWEEN ? AND ?)
 			   )`,
 			[startISO, endISO, startISO, endISO]
+		);
+		const rows = result[0]?.values ?? [];
+		return rows.map(rowToTodoItem);
+	}
+
+	/**
+	 * 매주 반복(요일 지정) 일정 전부 — 날짜 범위와 무관하게(사용자 요청, 2026-08-16:
+	 * "루틴들만 따로 확인할 수 있는 방법"). `getScheduleItemsOverlapping`은 특정 창에
+	 * 걸쳐 보이는 항목만 주지만, 이건 "지금 반복 중인 루틴 전부"를 한 번에 보여주는
+	 * 별도 화면(`RoutineListModal`)이 필요로 하는 조회.
+	 */
+	getRecurringScheduleItems(): ScheduleItem[] {
+		const result = this.db.exec(
+			`SELECT path, type, title, category, schedule_kind, start, "end", time_start,
+			        time_end, due, do_date, done, done_date, calendar_visible, link, recurrence, memo
+			 FROM items
+			 WHERE type = 'schedule' AND recurrence IS NOT NULL
+			 ORDER BY title`
+		);
+		const rows = result[0]?.values ?? [];
+		return rows.map(rowToScheduleItem);
+	}
+
+	/**
+	 * "상시" todos — neither a deadline nor a planned execution day (SPEC §2's "상시"
+	 * bucket, e.g. "도쿄여행 맛집 알아보기"). They don't belong to any date, so they can't
+	 * be queried by range like the others; the daily note's "상시 할일" section shows
+	 * these every day until checked off.
+	 */
+	getStandingTodos(): TodoItem[] {
+		const result = this.db.exec(
+			`SELECT path, type, title, category, due, do_date, done, done_date, link, memo
+			 FROM items
+			 WHERE type = 'todo' AND due IS NULL AND do_date IS NULL AND done = 0`
+		);
+		const rows = result[0]?.values ?? [];
+		return rows.map(rowToTodoItem);
+	}
+
+	/**
+	 * Open (undone) todos whose effective date — `do_date` if set, else `due` (same
+	 * convention as the calendar's day badge, see lilac-view summarizeTodosByDate) — falls
+	 * strictly before `beforeISO`. Backs the daily note's "지난 미완료" section: these are
+	 * todos whose planned/deadline day has already passed without being checked off.
+	 */
+	getOpenTodosBefore(beforeISO: string): TodoItem[] {
+		const result = this.db.exec(
+			`SELECT path, type, title, category, due, do_date, done, done_date, link, memo
+			 FROM items
+			 WHERE type = 'todo' AND done = 0
+			   AND (
+			        (do_date IS NOT NULL AND do_date < ?)
+			     OR (do_date IS NULL AND due IS NOT NULL AND due < ?)
+			   )`,
+			[beforeISO, beforeISO]
+		);
+		const rows = result[0]?.values ?? [];
+		return rows.map(rowToTodoItem);
+	}
+
+	/**
+	 * Todos actually completed *on* `dateISO` (`done_date`), regardless of what bucket
+	 * they would otherwise fall in — backs the daily note's "이 날 완료한 할일" section.
+	 * Without this, checking a todo off makes it vanish from every daily note forever,
+	 * including the very day it was completed on — "완료 날짜 당김"(SPEC §4)을 기록은
+	 * 하지만 그 기록을 다시 볼 곳이 없었던 빈틈.
+	 */
+	getTodosDoneOn(dateISO: string): TodoItem[] {
+		const result = this.db.exec(
+			`SELECT path, type, title, category, due, do_date, done, done_date, link, memo
+			 FROM items
+			 WHERE type = 'todo' AND done = 1 AND done_date = ?`,
+			[dateISO]
 		);
 		const rows = result[0]?.values ?? [];
 		return rows.map(rowToTodoItem);

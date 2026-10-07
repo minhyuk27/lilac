@@ -18,6 +18,9 @@ interface LilacItemBase {
 	title: string;
 	category: string | null;
 	link: string | null;
+	/** 연결된 문서(link/항목 노트)와는 별개의 짧은 메모 — 문서를 열지 않고도 데일리노트에서
+	 * 바로 보이는 한두 줄짜리 비고(사용자 요청, 2026-06-21). */
+	memo: string | null;
 }
 
 export interface ScheduleItem extends LilacItemBase {
