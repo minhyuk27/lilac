@@ -13,7 +13,7 @@ const LOOKAHEAD_DAYS = 7;
 const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 
 /** "6월 21일 (일)" — "오늘"이면 그것도 덧붙여 전날/다음날로 옮겨다닐 때도 길을 잃지 않게. */
-function formatDailyDateLabel(dateISO: string): string {
+export function formatDailyDateLabel(dateISO: string): string {
 	const date = parseISO(dateISO);
 	const base = `${date.getMonth() + 1}월 ${date.getDate()}일 (${WEEKDAY_LABELS[date.getDay()]})`;
 	return dateISO === todayISO() ? `${base} · 오늘` : base;
@@ -47,7 +47,6 @@ async function openItemTarget(app: App, item: ScheduleItem | TodoItem): Promise<
  * "## 메모" heading the template puts below this block — this function never touches it).
  */
 export async function renderDailyBlock(app: App, plugin: LilacPlugin, dateISO: string, el: HTMLElement): Promise<void> {
-	const db = plugin.getDatabase();
 	el.addClass("lilac-daily-block");
 
 	// 코드블록은 frontmatter 변경에 자동 재렌더되지 않으므로, 모달이 저장된 뒤 같은 자리에서
@@ -90,6 +89,24 @@ export async function renderDailyBlock(app: App, plugin: LilacPlugin, dateISO: s
 		todayBtn.onclick = () => void openDailyNote(app, new Date());
 	}
 
+	renderDailySections(app, plugin, dateISO, el, refresh);
+}
+
+/**
+ * 그 날의 목록(Schedule/Todo/Due/Overdue/Planned/Always/Finished) — 데일리노트 블록과
+ * 사이드바(sidebar-view.ts)가 **같은 함수**를 써서, 같은 할일이 어디서 보든 똑같이
+ * 보이고 똑같이 동작하게 한다(2026-10-07, 50라운드). 날짜 줄·도구 줄은 각자 다르므로
+ * 호출하는 쪽이 그린다. `refresh`는 체크·편집 뒤 호출자가 자기 화면을 다시 그리는 방법.
+ */
+export function renderDailySections(
+	app: App,
+	plugin: LilacPlugin,
+	dateISO: string,
+	el: HTMLElement,
+	refresh: () => void,
+	emptyText = "오늘은 일정도 할일도 없습니다."
+): void {
+	const db = plugin.getDatabase();
 	if (!db) {
 		el.createDiv({ cls: "lilac-day-detail-empty", text: "lilac 인덱스를 불러오는 중입니다." });
 		return;
@@ -159,7 +176,7 @@ export async function renderDailyBlock(app: App, plugin: LilacPlugin, dateISO: s
 		dueTodayTodos.length === 0;
 
 	if (isEmpty) {
-		el.createDiv({ cls: "lilac-day-detail-empty", text: "오늘은 일정도 할일도 없습니다." });
+		el.createDiv({ cls: "lilac-day-detail-empty", text: emptyText });
 		return;
 	}
 

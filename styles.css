@@ -1582,3 +1582,207 @@
 	background: transparent;
 	border: none;
 }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   사이드바(50라운드, 2026-10-07) — 오른쪽 사이드바(백링크·개요 자리)의 lilac 패널.
+   폭이 250~400px로 좁고 사용자가 끌어서 바꾸므로, 화면(뷰포트) 대신 패널 자기 폭을
+   기준으로 하는 컨테이너 쿼리로 압축한다. 목록(.lilac-daily-block)은 데일리노트와 같은
+   클래스를 그대로 써서 모양·동작이 같다 — 여기서는 사이드바용 간격만 손본다.
+   ─────────────────────────────────────────────────────────────────────────── */
+.lilac-sidebar {
+	container-type: inline-size;
+	display: flex;
+	flex-direction: column;
+	gap: 0.6rem;
+	padding: 0.6rem 0.6rem 1.2rem;
+	font-size: var(--font-ui-small);
+}
+
+/* ① 날짜 줄 */
+.lilac-sidebar-daterow {
+	display: flex;
+	align-items: center;
+	gap: 0.3rem;
+}
+.lilac-sidebar-daterow .lilac-nav-btn {
+	min-height: 2rem;
+	padding: 0.3em 0.6em;
+}
+.lilac-sidebar-daterow .lilac-today-btn {
+	width: 2rem;
+	height: 2rem;
+	margin-left: auto;
+}
+.lilac-sidebar-date-label {
+	flex: 1;
+	min-width: 0;
+	border: none;
+	background: transparent;
+	box-shadow: none;
+	padding: 0.2em 0.3em;
+	font-weight: 700;
+	font-size: 1.05em;
+	color: var(--text-normal);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	cursor: pointer;
+	border-radius: 0.5em;
+}
+.lilac-sidebar-date-label:hover {
+	background: var(--background-modifier-hover);
+}
+
+/* ② 도구 줄 — 아이콘만, 같은 크기로 고르게 */
+.lilac-sidebar-toolrow {
+	display: flex;
+	gap: 0.3rem;
+	flex-wrap: wrap;
+}
+.lilac-sidebar-icon-btn {
+	min-height: 2rem;
+	width: 2.2rem;
+	padding: 0;
+}
+.lilac-sidebar-icon-btn svg {
+	width: 1rem;
+	height: 1rem;
+}
+.lilac-sidebar-icon-btn.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+/* ③ 미니 달력 */
+.lilac-sidebar-cal {
+	display: flex;
+	flex-direction: column;
+	gap: 0.3rem;
+	padding: 0.5rem;
+	border-radius: 0.8rem;
+	background: var(--background-secondary);
+}
+.lilac-sidebar-cal-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+.lilac-sidebar-cal-title {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.2rem;
+	border: none;
+	background: transparent;
+	box-shadow: none;
+	padding: 0.2em 0.3em;
+	font-weight: 600;
+	color: var(--text-normal);
+	cursor: pointer;
+	border-radius: 0.4em;
+}
+.lilac-sidebar-cal-title:hover {
+	background: var(--background-modifier-hover);
+}
+.lilac-sidebar-cal-chevron svg {
+	width: 0.9rem;
+	height: 0.9rem;
+	color: var(--text-muted);
+}
+.lilac-sidebar-cal-nav {
+	display: flex;
+	gap: 0.2rem;
+}
+.lilac-sidebar-cal-nav .lilac-nav-btn {
+	min-height: 1.7rem;
+	padding: 0.2em 0.55em;
+	background: transparent;
+}
+.lilac-sidebar-cal-grid {
+	display: grid;
+	grid-template-columns: repeat(7, 1fr);
+	gap: 0.1rem;
+}
+.lilac-sidebar-cal-weekday {
+	text-align: center;
+	font-size: 0.75em;
+	color: var(--text-muted);
+	padding-bottom: 0.15rem;
+}
+.lilac-sidebar-cal-day {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.1rem;
+	min-width: 0;
+	height: auto;
+	padding: 0.2rem 0 0.25rem;
+	border: 1.5px solid transparent;
+	border-radius: 0.5rem;
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-normal);
+	cursor: pointer;
+}
+.lilac-sidebar-cal-day:hover {
+	background: var(--background-modifier-hover);
+}
+.lilac-sidebar-cal-num {
+	width: 1.5rem;
+	height: 1.5rem;
+	line-height: 1.5rem;
+	text-align: center;
+	border-radius: 50%;
+	font-size: 0.85em;
+}
+.lilac-sidebar-cal-weekday.is-sunday,
+.lilac-sidebar-cal-day.is-sunday { color: var(--color-red); }
+.lilac-sidebar-cal-weekday.is-saturday,
+.lilac-sidebar-cal-day.is-saturday { color: var(--color-blue); }
+.lilac-sidebar-cal-day.is-other-month { opacity: 0.35; }
+/* 오늘 = 채운 원, 선택 = 칸 테두리 — 둘이 겹쳐도 각각 보인다 */
+.lilac-sidebar-cal-day.is-today .lilac-sidebar-cal-num {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	font-weight: 700;
+}
+.lilac-sidebar-cal-day.is-selected {
+	border-color: var(--interactive-accent);
+}
+.lilac-sidebar-cal-marks {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 2px;
+	height: 0.4rem;
+}
+.lilac-sidebar-cal-dot {
+	width: 0.32rem;
+	height: 0.32rem;
+	border-radius: 50%;
+}
+/* 미완료 할일 = 속이 빈 작은 링(일정 점과 모양으로 구분) */
+.lilac-sidebar-cal-todo {
+	width: 0.32rem;
+	height: 0.32rem;
+	border-radius: 50%;
+	box-sizing: border-box;
+	border: 1.5px solid var(--text-muted);
+}
+
+/* ④ 목록 — 데일리노트 블록 그대로, 사이드바 폭에 맞게 간격만 */
+.lilac-sidebar .lilac-sidebar-list {
+	padding: 0;
+	gap: 0.7rem;
+}
+.lilac-sidebar .lilac-detail-row {
+	padding: 0.35em 0.4em;
+	gap: 0.5em;
+}
+
+/* 아주 좁을 때(사이드바를 바짝 줄였을 때) — 버튼·달력 칸을 더 작게 */
+@container (max-width: 280px) {
+	.lilac-sidebar-icon-btn { width: 1.9rem; min-height: 1.8rem; }
+	.lilac-sidebar-cal-num { width: 1.3rem; height: 1.3rem; line-height: 1.3rem; font-size: 0.78em; }
+	.lilac-sidebar-cal { padding: 0.4rem 0.3rem; }
+	.lilac-sidebar .lilac-edit-btn { min-width: 1.6rem; padding: 0.3rem; }
+}

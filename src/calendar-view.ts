@@ -8,6 +8,7 @@ import { openDailyNote } from "./daily-note";
 import { LilacStickyModal } from "./sticky-modal";
 import { LilacRoutineListModal } from "./routine-list-modal";
 import { loadHolidays } from "./holidays";
+import { isScheduleVisible, isCategoryVisible, summarizeTodosByDate, TodoDaySummary } from "./visibility";
 
 export const VIEW_TYPE_CALENDAR = "lilac-calendar";
 
@@ -76,15 +77,6 @@ const LANE_HEIGHT_REM = 1.15;
  * `.lilac-cell-date`'s height in styles.css (all in `rem`, see note above).
  */
 const DATE_ROW_OFFSET_REM = 2.1;
-
-/** How many of a day's todos are still pending vs. already finished — drives the day badge. */
-interface TodoDaySummary {
-	pending: number;
-	done: number;
-	/** Distinct category colors among that day's todos (any state), insertion order, capped
-	 * at 4 — drives the Todomate-style "clover" badge (배지를 카테고리별 색으로 분할). */
-	colors: string[];
-}
 
 const MAX_BADGE_COLORS = 4;
 
@@ -230,12 +222,12 @@ export class LilacCalendarView extends ItemView {
 			categoryById,
 			gridStartISO,
 			gridEndISO,
-			(item, category) => this.isVisible(item, category)
+			(item, category) => isScheduleVisible(item, category)
 		);
 		const todos = (db?.getTodoItemsInRange(gridStartISO, gridEndISO) ?? []).filter((t) =>
-			this.isCategoryVisible(t.category ? categoryById.get(t.category) ?? null : null)
+			isCategoryVisible(t.category ? categoryById.get(t.category) ?? null : null)
 		);
-		const todoSummaryByDate = this.summarizeTodosByDate(todos, categoryById);
+		const todoSummaryByDate = summarizeTodosByDate(todos, categoryById, MAX_BADGE_COLORS);
 		// 공휴일(고정 공휴일은 자동 계산, 설날/추석 등 음력 공휴일과 대체공휴일은 설정
 		// 탭에서 사용자가 추가 — holidays.ts 참고). 날짜 자체가 몇 개 안 되는 조회라
 		// DB에 안 두고 매 렌더마다 그냥 다시 계산/조회한다.
@@ -576,15 +568,6 @@ export class LilacCalendarView extends ItemView {
 		return Math.round((parseISO(iso).getTime() - weekStartMidnight.getTime()) / 86_400_000);
 	}
 
-	private isVisible(item: ScheduleItem, category: Category | null): boolean {
-		if (item.calendar_visible !== null) return item.calendar_visible;
-		return this.isCategoryVisible(category);
-	}
-
-	private isCategoryVisible(category: Category | null): boolean {
-		return category ? category.calendar_visible : true;
-	}
-
 	/** A single-day event shown by name — same visual language as a band, just not grid-spanned. */
 	private renderEventChip(container: HTMLElement, occ: Occurrence, laneHeightRem: number): void {
 		const chip = container.createDiv({ cls: "lilac-event-chip" });
@@ -601,24 +584,6 @@ export class LilacCalendarView extends ItemView {
 			e.stopPropagation();
 			void this.openItemTarget(occ.item);
 		};
-	}
-
-	/** Buckets each todo's date (do_date if set, else due) into pending/done counts for the day badge. */
-	private summarizeTodosByDate(todos: TodoItem[], categoryById: Map<string, Category>): Map<string, TodoDaySummary> {
-		const map = new Map<string, TodoDaySummary>();
-		for (const todo of todos) {
-			const dateISO = todo.do_date ?? todo.due;
-			if (!dateISO) continue;
-			const summary = map.get(dateISO) ?? { pending: 0, done: 0, colors: [] };
-			if (todo.done) summary.done++;
-			else summary.pending++;
-			const color = todo.category ? categoryById.get(todo.category)?.color : undefined;
-			if (color && !summary.colors.includes(color) && summary.colors.length < MAX_BADGE_COLORS) {
-				summary.colors.push(color);
-			}
-			map.set(dateISO, summary);
-		}
-		return map;
 	}
 
 	/**

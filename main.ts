@@ -1,9 +1,10 @@
-import { Notice, Plugin, TFile, TAbstractFile } from "obsidian";
+import { Notice, Platform, Plugin, TFile, TAbstractFile } from "obsidian";
 import { getDateFromFile } from "obsidian-daily-notes-interface";
 import { LilacDatabase } from "./src/database";
 import { scanVault, parseLilacItem } from "./src/scanner";
 import { loadCategories, CATEGORIES_PATH } from "./src/categories";
 import { LilacCalendarView, VIEW_TYPE_CALENDAR } from "./src/calendar-view";
+import { LilacSidebarView, VIEW_TYPE_SIDEBAR } from "./src/sidebar-view";
 import { LilacStickyModal } from "./src/sticky-modal";
 import { renderDailyBlock } from "./src/daily-render";
 import { openDailyNote } from "./src/daily-note";
@@ -43,6 +44,32 @@ export default class LilacPlugin extends Plugin {
 		this.registerEvent(this.app.metadataCache.on("resolved", onMetadataResolved));
 
 		this.registerView(VIEW_TYPE_CALENDAR, (leaf) => new LilacCalendarView(leaf, this));
+		this.registerView(VIEW_TYPE_SIDEBAR, (leaf) => new LilacSidebarView(leaf, this));
+
+		// 사이드바(50라운드, 2026-10-07): PC·태블릿에서 처음 한 번만 오른쪽 사이드바에 붙인다.
+		// 폰에서는 오른쪽 사이드바가 화면을 덮는 서랍이라 자동으로 붙이지 않는다(명령어로는 열 수
+		// 있음). 사용자가 닫은 뒤에는 다시 붙이지 않는다 — 매번 되살아나면 성가시다.
+		this.app.workspace.onLayoutReady(async () => {
+			if (this.settings.sidebarAutoPlaced || Platform.isPhone) return;
+			if (this.app.workspace.getLeavesOfType(VIEW_TYPE_SIDEBAR).length === 0) {
+				await this.app.workspace.getRightLeaf(false)?.setViewState({ type: VIEW_TYPE_SIDEBAR, active: false });
+			}
+			this.settings.sidebarAutoPlaced = true;
+			await this.saveSettings();
+		});
+
+		// 따라가기: 데일리노트를 열면 사이드바도 그 날짜로(백링크가 열린 노트를 따라가듯).
+		this.registerEvent(
+			this.app.workspace.on("file-open", (file) => {
+				if (!(file instanceof TFile)) return;
+				const date = getDateFromFile(file, "day");
+				if (!date) return;
+				const iso = toISO(date.toDate());
+				for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_SIDEBAR)) {
+					if (leaf.view instanceof LilacSidebarView) leaf.view.followDate(iso);
+				}
+			})
+		);
 		this.addSettingTab(new LilacSettingTab(this.app, this));
 
 		// SPEC §3.2: 데일리노트 템플릿에 한 줄 삽입해두면 그날의 일정·할일을 인터랙티브하게
@@ -72,7 +99,7 @@ export default class LilacPlugin extends Plugin {
 		// index 안 해도 자동으로 갱신" 요청).
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", (leaf) => {
-				if (leaf?.view instanceof LilacCalendarView) leaf.view.refresh();
+				if (leaf?.view instanceof LilacCalendarView || leaf?.view instanceof LilacSidebarView) leaf.view.refresh();
 			})
 		);
 
@@ -84,6 +111,12 @@ export default class LilacPlugin extends Plugin {
 			id: "lilac-open-calendar",
 			name: "Open calendar view",
 			callback: () => void this.openCalendarView(),
+		});
+
+		this.addCommand({
+			id: "lilac-open-sidebar",
+			name: "Open sidebar",
+			callback: () => void this.openSidebarView(),
 		});
 
 		this.addCommand({
@@ -127,9 +160,21 @@ export default class LilacPlugin extends Plugin {
 		this.app.workspace.revealLeaf(leaf);
 	}
 
+	/** 오른쪽 사이드바에 lilac 패널을 연다(이미 있으면 그 탭을 앞으로). */
+	async openSidebarView() {
+		const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_SIDEBAR)[0];
+		const leaf = existing ?? this.app.workspace.getRightLeaf(false);
+		if (!leaf) return;
+		if (!existing) await leaf.setViewState({ type: VIEW_TYPE_SIDEBAR, active: true });
+		this.app.workspace.revealLeaf(leaf);
+	}
+
 	refreshViews() {
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_CALENDAR)) {
 			if (leaf.view instanceof LilacCalendarView) leaf.view.refresh();
+		}
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_SIDEBAR)) {
+			if (leaf.view instanceof LilacSidebarView) leaf.view.refresh();
 		}
 	}
 

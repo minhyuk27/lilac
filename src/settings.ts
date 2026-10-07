@@ -19,9 +19,24 @@ export interface LilacSettings {
 	calendarPcFontScale: number;
 	/** 기본은 자동 판단 — 태블릿/특정 화면에서만 사용자가 직접 강제. */
 	deviceMode: LilacDeviceMode;
+	/**
+	 * 사이드바(50라운드, 2026-10-07): 데일리노트를 열면 사이드바도 그 날짜로 따라간다
+	 * (백링크가 열린 노트를 따라가는 것과 같은 감각). 끄면 사용자가 고른 날짜에 머문다.
+	 */
+	sidebarFollowDailyNote: boolean;
+	/** 사이드바 미니 달력 접힘 상태 — 다음에 열어도 그대로. */
+	sidebarMiniCalendarCollapsed: boolean;
+	/**
+	 * PC·태블릿에서 처음 한 번만 오른쪽 사이드바에 자동으로 붙였는지. 사용자가 닫은 뒤
+	 * 매번 다시 붙이면 성가시므로 한 번 붙인 뒤로는 명령어로만 다시 연다.
+	 */
+	sidebarAutoPlaced: boolean;
 }
 
 export const DEFAULT_SETTINGS: LilacSettings = {
 	calendarPcFontScale: 100,
 	deviceMode: "auto",
+	sidebarFollowDailyNote: true,
+	sidebarMiniCalendarCollapsed: false,
+	sidebarAutoPlaced: false,
 };
