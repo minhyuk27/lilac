@@ -8,6 +8,7 @@ Lilac은 옵시디언(Obsidian) 환경에서 일정, 할 일(Todo), 반복 루�
 
 - **목적**: 마크다운 기반의 지식 관리 도구인 옵시디언 내에서 외부 서드파티 캘린더 없이도 유려한 UI와 초고속 성능으로 개인 일정과 프로젝트 태스크를 관리
 - **대상 플랫폼**: Obsidian Desktop (Windows / macOS / Linux) 및 Obsidian Mobile (Android / iOS / Tablet)
+- **개발 형태**: 1인 단독 설계 및 프론트엔드/엔진 개발 (기여도 100%)
 - **핵심 특징**:
   - **반응형 3단 UI**: 오른쪽 사이드바 미니 패널, 전체 화면 몰입형 캘린더 뷰, 모바일 최적화 스와이프 인터페이스
   - **SQLite WASM 기반 로컬 인덱싱**: 수천 개의 일정/태스크를 마크다운 파일 파싱 지연 없이 수 밀리초 내에 즉시 조회
@@ -45,7 +46,7 @@ Lilac은 옵시디언(Obsidian) 환경에서 일정, 할 일(Todo), 반복 루�
 
 | 영역 | 기술 스택 | 설명 |
 |---|---|---|
-| **Language** | TypeScript (ES2022) | 엄격한 타입 안정성 및 모듈형 설계 |
+| **Language** | TypeScript (ES2022) | 엄격한 타입 안정성 및 모듈형 설계 (`tsc` 컴파일 무결) |
 | **Framework & API** | Obsidian Plugin API | 에디터, 워크스페이스, 리본, 사이드바 DOM 연동 |
 | **Local Database** | SQLite (WASM / `sql-wasm.wasm`) | 브라우저/모바일 네이티브 고속 인덱싱 |
 | **Styling & UI** | CSS3, Flexbox/Grid, CSS Custom Properties | 옵시디언 테마(Light/Dark) 완전 동기화 및 반응형 레이아웃 |
@@ -61,7 +62,7 @@ Lilac은 옵시디언(Obsidian) 환경에서 일정, 할 일(Todo), 반복 루�
    - 매일, 주간 특정 요일 반복, 월간 특정 일자 반복 등 정밀한 반복 주기 계산 엔진 내장
    - 특정 회차만 변경하거나 건너뛰는 예외(Overrides) 처리 지원
 3. **모바일 퍼스트 UX**:
-   - 모바일 노치 및 제스처를 고려한 하단 액션 시트, 가로 스와이프 카테고리 칩, 세그먼트 버튼 구현
+   - 모바일 제스처와 터치 인터페이스를 고려한 반응형 액션 시트 및 스와이프 칩 컴포넌트
 
 ---
 
@@ -71,6 +72,9 @@ Lilac은 옵시디언(Obsidian) 환경에서 일정, 할 일(Todo), 반복 루�
 # 의존성 설치
 npm install
 
+# 타입 검사 및 린트
+npx tsc --noEmit --skipLibCheck
+
 # 개발 모드 (소스 변경 감지 및 자동 빌드)
 npm run dev
 
@@ -79,3 +83,9 @@ npm run build
 ```
 
 빌드 산출물(`main.js`, `manifest.json`, `styles.css`)은 옵시디언 볼트의 `.obsidian/plugins/lilac/` 경로에 자동 배포됩니다.
+
+---
+
+## 6. 라이선스 (License)
+
+본 프로젝트는 [MIT License](LICENSE)를 따릅니다.
